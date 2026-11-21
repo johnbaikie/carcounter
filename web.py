@@ -223,7 +223,39 @@ NAV = [('/', 'Today'), ('/days', 'All Days'), ('/settings', 'Settings'), ('/powe
        ('/alerts', 'Alerts'), ('/summary.csv', 'Download Summary')]
 
 
-def page(title, body, refresh=None, active=None):
+def events_version(day):
+    """Changes whenever a car is logged for `day` (size + mtime of its events.csv files)."""
+    parts = []
+    for root in cd.read_roots():
+        try:
+            st = (root / day / 'events.csv').stat()
+            parts.append(f'{st.st_size}-{st.st_mtime_ns}')
+        except OSError:
+            pass
+    return '|'.join(parts)
+
+
+# reload the page as soon as a new car is logged (checked every 3 s while the page is visible)
+WATCH_JS = """<script>
+(() => {
+  const url = '/api/version?day=%s';
+  let v = %s;
+  async function check() {
+    if (document.hidden) return;
+    try {
+      const d = await (await fetch(url, {cache: 'no-store'})).json();
+      if (d.v !== v) location.reload();
+    } catch (e) {}
+  }
+  setInterval(check, 3000);
+  document.addEventListener('visibilitychange', check);
+})();
+</script>"""
+
+
+def page(title, body, refresh=None, active=None, watch=None):
+    if watch:
+        body += WATCH_JS % (watch, json.dumps(events_version(watch)))
     nav = ''.join(f'<a href="{u}"{' class="active" aria-current="page"' if u == active else ''}>{t}</a>' for u, t in NAV)
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ''
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -382,7 +414,7 @@ def dashboard():
 <div class="row"><div class="card"><h2>Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
 <div class="card"><h2>Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
 <div class="card"><h2>Latest photos</h2>{photos_grid(recent, 12)}</div>"""
-    return page('Car Counter', body, refresh=60, active='/')
+    return page('Car Counter', body, refresh=60, active='/', watch=t)
 
 
 def day_page(d):
@@ -401,7 +433,7 @@ def day_page(d):
     body = f"""<p><a href="/day/{prev}">← {prev:%a %d %b}</a> &nbsp; <a href="/day/{nxt}">{nxt:%a %d %b} →</a></p>
 <div class="card"><h2>{dt:%A %d %B %Y} · {len(evs)} cars</h2>{hourly_chart(evs, d)}</div>
 <div class="card"><h2>Events</h2>{table}</div>"""
-    return page(f'Cars {d}', body)
+    return page(f'Cars {d}', body, watch=d if d == cd.today() else None)
 
 
 def days_page():
@@ -890,8 +922,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_html(power_page(msg=q.get('msg', [None])[0]))
             if path == '/api/power-card':
                 return self.send_html(power_card())
-            if path == '/api/live':
-                data = json.dumps(cd.live_state() or {}).encode()
+            if path in ('/api/live', '/api/version'):
+                if path == '/api/live':
+                    data = json.dumps(cd.live_state() or {}).encode()
+                else:
+                    day = parse_qs(self.path.split('?', 1)[1] if '?' in self.path else '').get('day', [''])[0]
+                    data = json.dumps({'v': events_version(day) if cd.DAY_RE.match(day) else ''}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Cache-Control', 'no-store')
