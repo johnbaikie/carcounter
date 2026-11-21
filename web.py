@@ -270,6 +270,20 @@ def page(title, body, refresh=None, active=None, watch=None):
 
 
 # ---------------------------------------------------------------- pages
+THROTTLE_BITS = {0: 'under-voltage', 1: 'CPU speed capped', 2: 'throttled', 3: 'temperature limit'}
+
+
+def throttle_flags(value):
+    """vcgencmd get_throttled -> (problems now, problems earlier since boot) as text lists."""
+    try:
+        v = int(value or '0', 16)
+    except ValueError:
+        return [], []
+    now = [t for b, t in THROTTLE_BITS.items() if v & (1 << b)]
+    past = [t for b, t in THROTTLE_BITS.items() if v & (1 << (b + 16)) and t not in now]
+    return now, past
+
+
 def health_card():
     rows = cd.health(cd.today())
     if not rows:
@@ -284,13 +298,17 @@ def health_card():
         badge = status_badge('warn', 'Counting, but camera unavailable')
     elif h.get('fan_rpm') == '0' and float(h.get('cpu_temp_c') or 0) >= 65:
         badge = status_badge('warn', f'Running - fan not spinning, CPU {h["cpu_temp_c"]} °C')
-    elif h.get('throttled') not in ('', '0x0', None):
-        badge = status_badge('warn', f'Running - power/thermal flags {h["throttled"]}')
+    elif throttle_flags(h.get('throttled'))[0]:
+        badge = status_badge('warn', 'Running - ' + ', '.join(throttle_flags(h.get('throttled'))[0]) + ' now')
     else:
         badge = status_badge('good', 'Running')
     cfg = cd.load_settings()
     if age <= STALE_S and not cd.in_window(cfg['COUNT_START'], cfg['COUNT_STOP']):
         badge += f' <span class="pill">⏸ Counting paused · counting hours {cfg["COUNT_START"]}-{cfg["COUNT_STOP"]}</span>'
+    now_f, past_f = throttle_flags(h.get('throttled'))
+    if past_f and not now_f:
+        badge += (f'<br><span class="muted" style="font-size:13px">Earlier since boot: {", ".join(past_f)} '
+                  '(cleared - often a brief dip at power-on)</span>')
     power = '—'
     if h.get('ac_power') != '':
         power = ('Mains' if h['ac_power'] == '1' else 'BATTERY') + \
