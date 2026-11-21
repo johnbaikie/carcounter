@@ -14,6 +14,7 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
   - BATTERIES NOT INSTALLED YET (arriving soon). Do not enable the x120x-ups systemd service until they are in and bat.py/pld.py are tested.
 - Fan: config.txt has dtparam=cooling_fan=on (cooling_device0 works); original fan connector is faulty, planning Active Cooler or GPIO fan
 - Storage: 123 GB USB drive (vfat, UUID 344F-1B4F) fstab-mounted at /mnt/carcount (nofail,flush; fstab backup /etc/fstab.bak-20261120)
+- Remote access: Tailscale (tailscaled enabled, operator=carcount); web at http://carcounter:8080 from tailnet devices. Never port-forward (no auth)
 - Power: mains via outdoor extension cord -> 5V/5A USB-C into X1202; batteries are backup only (~5-9 h runtime)
 
 ## Site geometry
