@@ -23,13 +23,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
+import alerts
 import carcount_data as cd
 
 SRC = Path(__file__).resolve().parent
 STARTED = time.time()
 SERVICES = {   # restart button: service -> files whose changes need that restart
-    'web': ('carcount-web', 'Web page', ['web.py', 'carcount_data.py', 'ups_monitor.py']),
+    'web': ('carcount-web', 'Web page', ['web.py', 'carcount_data.py', 'ups_monitor.py', 'alerts.py']),
     'counter': ('carcount', 'Counter', ['carcounter.py', 'carcount_data.py']),
+    'alerts': ('carcount-alerts', 'Notifications', ['alerts.py', 'carcount_data.py']),
 }
 
 PORT = 8080
@@ -101,9 +103,11 @@ padding:10px 0;border-bottom:1px solid var(--grid)}
 .field label{font-weight:600}
 .field .help{color:var(--ink2);font-size:13px}
 .field .err{color:var(--bad);font-size:13px;grid-column:1/-1}
-input[type=number],select{width:140px;padding:6px 8px;border:1px solid var(--axis);border-radius:6px;
+input[type=number],input[type=time],input[type=password],select{width:140px;box-sizing:border-box;padding:6px 8px;border:1px solid var(--axis);border-radius:6px;
 background:var(--page);color:var(--ink);font:inherit}
 input[type=checkbox]{width:20px;height:20px}
+input[type=password]{width:100%;max-width:260px}
+button:disabled{opacity:.5;cursor:default}
 button{font:inherit;font-weight:600;padding:8px 16px;border-radius:8px;border:1px solid var(--axis);
 background:var(--surface);color:var(--ink);cursor:pointer}
 button.primary{background:var(--bar);border-color:var(--bar);color:#fff}
@@ -111,7 +115,7 @@ button.primary{background:var(--bar);border-color:var(--bar);color:#fff}
 .live{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
 @media (max-width:600px){
 .field{grid-template-columns:1fr}
-input[type=number],select{font-size:16px}   /* iOS zooms into inputs below 16px */
+input[type=number],input[type=time],input[type=password],select{font-size:16px}   /* iOS zooms into inputs below 16px */
 main{padding:12px}
 .card{padding:14px}
 .hero{gap:20px}
@@ -216,7 +220,7 @@ def status_badge(kind, text):
 
 
 NAV = [('/', 'Today'), ('/days', 'All Days'), ('/settings', 'Settings'), ('/power', 'Power'),
-       ('/summary.csv', 'Download Summary')]
+       ('/alerts', 'Alerts'), ('/summary.csv', 'Download Summary')]
 
 
 def page(title, body, refresh=None, active=None):
@@ -252,6 +256,9 @@ def health_card():
         badge = status_badge('warn', f'Running - power/thermal flags {h["throttled"]}')
     else:
         badge = status_badge('good', 'Running')
+    cfg = cd.load_settings()
+    if age <= STALE_S and not cd.in_window(cfg['COUNT_START'], cfg['COUNT_STOP']):
+        badge += f' <span class="pill">⏸ Counting paused · counting hours {cfg["COUNT_START"]}-{cfg["COUNT_STOP"]}</span>'
     power = '—'
     if h.get('ac_power') != '':
         power = ('Mains' if h['ac_power'] == '1' else 'BATTERY') + \
@@ -410,10 +417,10 @@ def days_page():
     return page('All days', body, active='/days')
 
 
-def signal_counter(sig):
-    """Send a signal to carcount.service's main process. Returns error text or None."""
+def signal_counter(sig, unit='carcount'):
+    """Send a signal to a service's main process (default the counter). Returns error text or None."""
     try:
-        pid = int(subprocess.run(['systemctl', 'show', '-p', 'MainPID', '--value', 'carcount'],
+        pid = int(subprocess.run(['systemctl', 'show', '-p', 'MainPID', '--value', unit],
                                  capture_output=True, text=True, timeout=5).stdout.strip() or 0)
     except (OSError, ValueError, subprocess.SubprocessError) as e:
         return f'could not find the counter process ({e})'
@@ -431,9 +438,11 @@ def fmt(v):
 
 
 APPLY_NOTE = {'live': 'applies immediately', 'restart': 'counter restarts (~5 s)',
-              'next run': 'applies at next hourly maintenance', 'ups': 'applies within a few seconds'}
+              'next run': 'applies at next hourly maintenance', 'ups': 'applies within a few seconds',
+              'alerts': 'applies within 30 s'}
 POWER_KEYS = [k for k, st in cd.SETTING.items() if st['group'] == 'Power']
-COUNTER_KEYS = [k for k in cd.SETTING if k not in POWER_KEYS]
+ALERT_KEYS = [k for k, st in cd.SETTING.items() if st['group'] == 'Notifications']
+COUNTER_KEYS = [k for k in cd.SETTING if k not in POWER_KEYS and k not in ALERT_KEYS]
 
 
 def settings_cards(keys, values, errors):
@@ -445,6 +454,8 @@ def settings_cards(keys, values, errors):
         elif st['type'] == 'choice':
             opts = ''.join(f'<option{" selected" if o == v else ""}>{o}</option>' for o in cd.PHOTO_SIZES)
             inp = f'<select name="{key}" id="{key}">{opts}</select>'
+        elif st['type'] == 'time':
+            inp = f'<input type="time" name="{key}" id="{key}" value="{esc(v)}" required>'
         else:
             step = '1' if st['type'] == 'int' else 'any'
             inp = (f'<input type="number" name="{key}" id="{key}" value="{esc(fmt(v))}" '
@@ -501,8 +512,10 @@ async function poll() {{
     $('l-thr').textContent = d.threshold + ' cm';
     $('l-thr-label').textContent = d.baseline === null ? 'counts below (no target)' : 'counts below';
     $('l-state').textContent = d.state === 'calibrating' ? 'calibrating' : d.blocked ? '■ blocked' : '○ clear';
+    const sched = d.counting === false ? ' (counting hours ' + d.count_hours + ')'
+      : d.photos === false && d.photo_hours !== 'all day' ? ' · photos off (photo hours ' + d.photo_hours + ')' : '';
     $('l-base').textContent = (d.baseline === null ? 'No far-side target: ' : 'Baseline ' + d.baseline + ' cm · ')
-      + d.count + ' counted today · ' + (d.state === 'in event' ? 'car passing' : d.state);
+      + d.count + ' counted today · ' + (d.state === 'in event' ? 'car passing' : d.state === 'paused' ? 'counting paused' : d.state) + sched;
   }} catch (e) {{}}
 }}
 poll(); setInterval(poll, 500);
@@ -614,6 +627,8 @@ def apply_message(changed):
             return msg + f' Note: {err}.'
         if any(cd.SETTING[k]['apply'] == 'restart' for k in counter):
             return msg + ' The counter is restarting to apply camera changes.'
+    if any(k in ALERT_KEYS for k in changed) and service_started('carcount-alerts') is None:
+        return msg + ' The notification service is not running - they apply when it starts.'
     if any(k in POWER_KEYS for k in changed) and not ups_service()['active']:
         return msg + ' The UPS monitor is not running - they apply when it starts.'
     return msg + ' Applied.'
@@ -745,6 +760,69 @@ def power_events(limit=25):
     return '<table><tr><th>Time</th><th>Event</th></tr>' + ''.join(rows) + '</table>'
 
 
+# ---------------------------------------------------------------- alerts
+KEY_RE = re.compile(r'^[A-Za-z0-9]{30}$')
+
+
+def save_keys(form):
+    try:                                   # keep a key saved on its own (e.g. user key first, token later)
+        raw = json.loads(cd.PUSHOVER_PATH.read_text())
+        old = (raw.get('user') or '', raw.get('token') or '')
+    except (OSError, ValueError, AttributeError):
+        old = ('', '')
+    user = form.get('user', [''])[0].strip() or old[0]
+    token = form.get('token', [''])[0].strip() or old[1]
+    if not KEY_RE.match(user) or (token and not KEY_RE.match(token)):
+        return 'Not saved: the user key and API token are each 30 letters and digits.'
+    if not token:
+        cd.save_pushover_keys(user, '')
+        return 'User key saved. Now add the API token.'
+    cd.save_pushover_keys(user, token)
+    return 'Pushover keys saved. Use "Send test notification" to check them.'
+
+
+def alerts_page(values=None, errors=None, msg=None):
+    values = values or cd.load_settings()
+    errors = errors or {}
+    keys = cd.pushover_keys()
+    running = service_started('carcount-alerts') is not None
+    try:
+        user_only = not keys and bool(json.loads(cd.PUSHOVER_PATH.read_text()).get('user'))
+    except (OSError, ValueError, AttributeError):
+        user_only = False
+    status = (status_badge('good', 'Pushover keys saved') if keys else
+              status_badge('warn', 'User key saved - API token missing') if user_only else
+              status_badge('warn', 'Pushover keys not set')) + ' ' + \
+        (status_badge('good', 'notification service running') if running else
+         status_badge('bad', 'notification service not running'))
+    hint = '•••••• saved - leave blank to keep' if keys else ''
+    log_rows = ''.join(
+        f'<tr><td>{esc(r["time"][5:16].replace("T", " "))}</td><td>{esc(r["title"])}</td>'
+        f'<td>{esc(r["message"]).replace(chr(10), "<br>")}'
+        f'{"<br>" + status_badge("bad", r["error"]) if r.get("error") else ""}</td></tr>'
+        for r in alerts.recent(30))
+    body = f"""{banner(msg, errors)}
+<div class="card"><h2>Pushover</h2><p>{status}</p>
+<form method="post" action="/alerts/keys"><fieldset>
+<div class="field"><label for="user">User key</label>
+<input type="password" name="user" id="user" autocomplete="off" placeholder="{hint}">
+<div class="help">On <a href="https://pushover.net" target="_blank" rel="noopener">pushover.net</a> after
+signing in: "Your User Key", top right.</div></div>
+<div class="field"><label for="token">API token</label>
+<input type="password" name="token" id="token" autocomplete="off" placeholder="{hint}">
+<div class="help">On pushover.net: "Create an Application/API Token", name it Car Counter, copy the API Token.</div></div>
+</fieldset>
+<div class="buttons"><button class="primary" type="submit">Save keys</button>
+<button type="submit" formaction="/alerts/test"{"" if keys else " disabled"}>Send test notification</button></div></form>
+<p class="muted">Install the Pushover app on your phone and sign in with the same account. The keys are stored
+only on the Pi, never in the code repository.</p></div>
+{settings_form('/alerts', ALERT_KEYS, values, errors, 'notification settings')}
+<div class="card"><h2>Recent notifications</h2>
+{f'<table class="log"><tr><th>When</th><th>Type</th><th>Message</th></tr>{log_rows}</table>' if log_rows
+ else '<p class="muted">None sent yet.</p>'}</div>"""
+    return page('Alerts', body, active='/alerts')
+
+
 def power_page(values=None, errors=None, msg=None):
     values = values or cd.load_settings()
     errors = errors or {}
@@ -804,6 +882,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/settings':
                 q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
                 return self.send_html(settings_page(msg=q.get('msg', [None])[0]))
+            if path == '/alerts':
+                q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
+                return self.send_html(alerts_page(msg=q.get('msg', [None])[0]))
             if path == '/power':
                 q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
                 return self.send_html(power_page(msg=q.get('msg', [None])[0]))
@@ -843,7 +924,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = min(int(self.headers.get('Content-Length') or 0), 100_000)
             form = parse_qs(self.rfile.read(n).decode(errors='replace'), keep_blank_values=True)
-            for base, keys, page_fn in (('/settings', COUNTER_KEYS, settings_page), ('/power', POWER_KEYS, power_page)):
+            if self.path == '/alerts/keys':
+                return self.redirect('/alerts?msg=' + quote(save_keys(form)))
+            if self.path == '/alerts/test':
+                err = alerts.send(alerts.OK, 'Test notification from the car counter.')
+                return self.redirect('/alerts?msg=' + quote(f'Test NOT sent: {err}' if err else
+                                                            'Test notification sent - check your phone.'))
+            for base, keys, page_fn in (('/settings', COUNTER_KEYS, settings_page), ('/power', POWER_KEYS, power_page),
+                                        ('/alerts', ALERT_KEYS, alerts_page)):
                 if self.path == base:
                     values, errors, changed = save_from_form(form, keys)
                     if errors:
@@ -852,7 +940,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == base + '/reset':
                     changed = reset_settings(keys)
                     return self.redirect(f'{base}?msg=' + quote('Reset to defaults. ' + apply_message(changed)))
-            m = re.fullmatch(r'/restart/(web|counter)', self.path)
+            m = re.fullmatch(r'/restart/(web|counter|alerts)', self.path)
             if m:
                 unit, label, files = SERVICES[m[1]]
                 err = check_code(files)
@@ -863,6 +951,9 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                     threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGTERM)).start()
                     return None
+                if m[1] == 'alerts':
+                    err = signal_counter(signal.SIGTERM, unit)
+                    return self.redirect('/settings?msg=' + quote(err or 'Notification service restarting.'))
                 err = signal_counter(signal.SIGTERM)
                 return self.redirect('/settings?msg=' + quote(err or 'Counter restarting - counting resumes in about 10 s.'))
             if self.path == '/recalibrate':

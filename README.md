@@ -23,8 +23,9 @@ distance or lost signal) and is counted once, however long it blocks the beam.
 | `web.py` | Web page on port 8080: today, status, charts, photos, per-day pages, Settings |
 | `maintenance.py` | Hourly: move SD fallback data to USB, photo retention, `summary_daily.csv`, SQLite update |
 | `carcount_db.py` | SQLite copy of the CSVs for fast queries (derived; safe to delete and rebuild) |
+| `alerts.py` | Phone notifications via Pushover: problems, power, highlights, daily summary |
 | `ups_monitor.py` | X1202 UPS: logs power events, safe shutdown on low battery, RTC wake to restart |
-| `tests/` | `python3 tests/test_detector.py`, `test_fallback.py`, `test_db.py` |
+| `tests/` | `python3 tests/test_detector.py`, `test_fallback.py`, `test_db.py`, `test_alerts.py` |
 | `systemd/` | Service and timer units |
 | `luna_camera.py` | Original prototype (superseded) |
 
@@ -56,7 +57,7 @@ git clone <this repo> ~/src
 #   UUID=XXXX-XXXX /mnt/carcount vfat defaults,nofail,noatime,flush,uid=1000,gid=1000,umask=022,x-systemd.device-timeout=10s 0 0
 sudo cp ~/src/systemd/carcount*.service ~/src/systemd/carcount-maintenance.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now carcount carcount-web carcount-maintenance.timer
+sudo systemctl enable --now carcount carcount-web carcount-alerts carcount-maintenance.timer
 # UPS monitor only once batteries are installed and tested:
 #   sudo python3 ~/src/ups_monitor.py --dry-run
 #   sudo systemctl enable --now carcount-ups
@@ -69,6 +70,9 @@ Paths assume user `carcount` with the code in `/home/carcount/src`.
 - Run by hand (stop the service first): `python3 carcounter.py -v` prints every reading
 - Settings are edited on the web Settings page and stored in `~/.config/carcount/config.json`;
   the counter reloads on `SIGHUP` and recalibrates on `SIGUSR1`.
+- Notifications: install the Pushover app, then enter your user key and an application API token on the
+  web Alerts page (stored in `~/.config/carcount/pushover.json`, mode 600). `python3 alerts.py --once`
+  shows what would be sent right now.
 
 ## License
 MIT - see [LICENSE](LICENSE).

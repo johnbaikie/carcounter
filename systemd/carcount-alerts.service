@@ -1,0 +1,14 @@
+[Unit]
+Description=Car counter phone notifications (Pushover)
+After=network-online.target mnt-carcount.mount
+Wants=network-online.target
+
+[Service]
+User=carcount
+Group=carcount
+ExecStart=/usr/bin/python3 -u /home/carcount/src/alerts.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

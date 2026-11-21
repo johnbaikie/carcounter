@@ -27,10 +27,16 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - Repo: https://github.com/johnbaikie/carcounter (PUBLIC - never commit photos, logs, config.json or secrets)
 - carcount_data.py: shared paths (USB_ROOT /mnt/carcount, SD_ROOT ~/carcount_data), CSV fields, readers,
   and SETTINGS (tunable defaults/limits). Overrides in ~/.config/carcount/config.json (only non-defaults stored)
-- carcounter.py: v1 counter. Tunables from settings; SIGHUP = reload (camera size/enable -> self-exit, systemd restarts),
+- carcounter.py: v1 counter. Schedule settings COUNT_START/STOP, PHOTO_START/STOP (HH:MM, equal = all day, wraps midnight;
+  outside counting hours blockages are tracked but not logged). Tunables from settings; SIGHUP = reload (camera size/enable -> self-exit, systemd restarts),
   SIGUSR1 = recalibrate. Writes /dev/shm/carcount-live.json 2x/s. `-v` prints frames, `--no-camera`.
   Output: <root>/YYYY-MM-DD/{events.csv,health.csv,photos/,thumbs/}. Photos/CSV/health on a writer thread.
   health.csv every 60 s (fps, valid%, baseline, lidar/CPU temp, fan rpm, throttled, disk, camera, UPS). sd_notify watchdog.
+- alerts.py (carcount-alerts.service, user carcount): Pushover notifications, checks every 30 s. Problems (counter down,
+  lidar/camera, beam blocked, USB missing, disk, CPU hot, under-voltage), power (mains/battery, Pi restarted = power cut),
+  highlights (record day, busy hour, no cars in daytime), daily summary. ALERT_* settings on web /alerts.
+  Keys in ~/.config/carcount/pushover.json (600, never commit). State ~/.local/share/carcount/alerts-state.json,
+  sent log alerts-log.jsonl. Unsent messages retried 6 h. `--once` dry run, `--test`. ups_monitor sends before shutdown.
 - ups_monitor.py: PLD + fuel gauge; shuts down only when on battery AND (low for N reads OR max time on battery);
   sets RTC wakealarm first. UPS_* settings re-read from config.json when it changes (runs as root, no signal needed).
   Writes /run/carcount-ups.json (state, pending shutdown, grace). `--once`, `--dry-run`
@@ -44,7 +50,7 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - Deploy code changes: Settings page > System card Restart buttons (import-check first), or
   kill $(systemctl show -p MainPID --value carcount[-web]) (Restart=always)
 - systemd/: carcount.service (Type=notify, WatchdogSec=60), carcount-web.service, carcount-maintenance.{service,timer},
-  carcount-ups.service (NOT enabled until batteries tested). Logs: journalctl -u carcount -f
+  carcount-alerts.service, carcount-ups.service (NOT enabled until batteries tested). Logs: journalctl -u carcount -f
 - Hardware watchdog already active by default (systemd RuntimeWatchdogUSec=1min)
 - sudo needs a password (since 2026-11-20 reboot) - Claude can't install units; user runs sudo commands
 - luna_camera.py: original prototype (superseded)
@@ -59,5 +65,6 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 
 ## v2 / later
 - DONE: retention, daily/hourly summaries, health logging, watchdog, web page
-- TODO: alerts (needs a channel: ntfy/email/etc), night imaging, direction/speed, vehicle classification
+- DONE: alerts via Pushover (alerts.py)
+- TODO: night imaging, direction/speed, vehicle classification
 - Open questions: crossings vs visits (cul-de-sac in/out double counting), filtering people/bikes/dogs

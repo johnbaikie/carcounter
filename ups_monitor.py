@@ -32,6 +32,7 @@ import time
 import gpiod
 import smbus2
 
+import alerts
 import carcount_data as cd
 
 PLD_PIN = 6
@@ -105,6 +106,10 @@ def set_wake_alarm(seconds):
 def shutdown(reason, wake_min):
     log.critical('SHUTDOWN: %s.%s', reason,
                  f' Waking again in {wake_min} min via RTC alarm.' if wake_min else ' No wake alarm set.')
+    if cd.load_settings()['ALERT_POWER']:
+        alerts.send(alerts.POWER, f'Shutting down safely: {reason}. '
+                    + (f'Will wake up again in {wake_min} min.' if wake_min else 'It will stay off until power returns.'),
+                    priority=1, log_it=False)        # root: don't create a root-owned log file
     if wake_min:
         try:
             set_wake_alarm(wake_min * 60)
