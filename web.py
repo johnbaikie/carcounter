@@ -397,21 +397,62 @@ img.addEventListener('touchend', ev => {{
     return page(f'Car {dt:%Y-%m-%d %H:%M:%S}', body)
 
 
-def photos_grid(evs, limit=None):
+def photos_grid(evs, limit=None, show_date=False):
     items = []
+    today = cd.today()
     for e in reversed(evs):
         t = photo_url(e.get('photo'), 'thumb')
         if not t:
             continue
         full = view_url(e)
         items.append(f'<figure><a href="{full}"><img loading="lazy" src="{t}" alt="Car at {esc(e["timestamp"][11:19])}"></a>'
-                     f'<figcaption>{esc(e["timestamp"][11:19])} · #{esc(e["count_today"])}</figcaption></figure>')
+                     f'<figcaption>{esc(photo_day_label(e, today) if show_date else "")}'
+                     f'{esc(e["timestamp"][11:19])} · #{esc(e["count_today"])}</figcaption></figure>')
         if limit and len(items) >= limit:
             break
     return f'<div class="photos">{"".join(items)}</div>' if items else '<p class="muted">No photos yet.</p>'
 
 
-def dashboard():
+PHOTOS_PER_PAGE = 12
+
+
+def photo_day_label(e, today):
+    d = e['timestamp'][:10]
+    return '' if d == today else f'{date.fromisoformat(d):%a %d %b} '
+
+
+def photo_page(p):
+    """Events with photos for page p (1 = newest), newest first, across days; and whether older ones exist."""
+    need = p * PHOTOS_PER_PAGE + 1
+    found = []
+    for d in reversed(cd.all_days()):
+        found.extend(e for e in reversed(cd.events(d)) if photo_url(e.get('photo'), 'thumb'))
+        if len(found) >= need:
+            break
+    start = (p - 1) * PHOTOS_PER_PAGE
+    return found[start:start + PHOTOS_PER_PAGE], len(found) > start + PHOTOS_PER_PAGE
+
+
+def photos_section(p):
+    evs, older = photo_page(p)
+    def btn(label, target, ok):
+        return (f'<a class="navbtn" href="/?p={target}#photos">{label}</a>' if ok
+                else f'<span class="navbtn disabled" aria-disabled="true">{label}</span>')
+    if not evs:
+        span = 'No photos' + (' on this page' if p > 1 else ' yet')
+    else:
+        span = f'{evs[-1]["timestamp"][:16].replace("T", " ")} – {evs[0]["timestamp"][11:16]}' \
+            if evs[0]['timestamp'][:10] == evs[-1]['timestamp'][:10] else \
+            f'{evs[-1]["timestamp"][:16].replace("T", " ")} – {evs[0]["timestamp"][:16].replace("T", " ")}'
+    bar = (f'<div class="vbar">{btn("◀ Newer", p - 1, p > 1)}'
+           f'<div class="vtitle"><strong>{"Latest" if p == 1 else f"Page {p}"}</strong>'
+           f'<span class="muted">{esc(span)}</span></div>{btn("Older ▶", p + 1, older)}</div>')
+    return (f'<div class="card" id="photos"><h2>Photos</h2>{bar}'
+            f'{photos_grid(list(reversed(evs)), show_date=True)}'
+            f'{bar if len(evs) > 4 else ""}</div>')
+
+
+def dashboard(p=1):
     today = date.today()
     t = today.isoformat()
     evs = cd.events(t)
@@ -421,8 +462,6 @@ def dashboard():
     totals = [len(cd.events(d.isoformat())) for d in days]
     daily = line_chart(totals, [d.strftime('%d') for d in days],
                       [f'{d:%a %d %b} · {n} car{"s" * (n != 1)}' for d, n in zip(days, totals)], label_every=2)
-    # last 12 photos, reaching back into yesterday if today has few
-    recent = cd.events((today - timedelta(days=1)).isoformat()) + evs
     body = f"""
 <div class="row"><div class="card"><h2>Today · {today:%a %d %b %Y}</h2><div class="hero">
 <div><div class="big">{len(evs)}</div><div class="sub">cars today</div></div>
@@ -431,7 +470,9 @@ def dashboard():
 {health_card()}</div>
 <div class="row"><div class="card"><h2>Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
 <div class="card"><h2>Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
-<div class="card"><h2>Latest photos</h2>{photos_grid(recent, 12)}</div>"""
+{photos_section(p)}"""
+    if p > 1:   # browsing older photos: don't auto-refresh back to the newest
+        return page('Car Counter', body, active='/')
     return page('Car Counter', body, refresh=60, active='/', watch=t)
 
 
@@ -926,7 +967,12 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(self.path.split('?')[0])
         try:
             if path == '/':
-                return self.send_html(dashboard())
+                q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
+                try:
+                    p = max(1, min(int(q.get('p', ['1'])[0]), 10000))
+                except ValueError:
+                    p = 1
+                return self.send_html(dashboard(p))
             if path == '/days':
                 return self.send_html(days_page())
             if path == '/settings':
