@@ -216,7 +216,7 @@ def status_badge(kind, text):
 
 
 NAV = [('/', 'Today'), ('/days', 'All days'), ('/settings', 'Settings'), ('/power', 'Power'),
-       ('/summary.csv', 'summary.csv')]
+       ('/summary.csv', 'Download Summary')]
 
 
 def page(title, body, refresh=None, active=None):
