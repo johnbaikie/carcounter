@@ -1,0 +1,20 @@
+[Unit]
+Description=Car counter (TF-Luna beam + camera)
+After=local-fs.target mnt-carcount.mount
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=60
+User=carcount
+Group=carcount
+SupplementaryGroups=dialout video
+ExecStart=/usr/bin/python3 -u /home/carcount/src/carcounter.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Car counter web page (port 8080)
+After=network.target mnt-carcount.mount
+
+[Service]
+User=carcount
+Group=carcount
+ExecStart=/usr/bin/python3 -u /home/carcount/src/web.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

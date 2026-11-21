@@ -1,0 +1,12 @@
+[Unit]
+Description=X1202 UPS monitor (low-battery safe shutdown)
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/python3 -u /home/carcount/src/ups_monitor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

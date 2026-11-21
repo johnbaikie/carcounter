@@ -1,0 +1,10 @@
+[Unit]
+Description=Car counter housekeeping (retention, SD->USB merge, summaries)
+After=mnt-carcount.mount
+
+[Service]
+Type=oneshot
+User=carcount
+Group=carcount
+Nice=10
+ExecStart=/usr/bin/python3 /home/carcount/src/maintenance.py
