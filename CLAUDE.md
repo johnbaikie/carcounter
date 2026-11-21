@@ -44,11 +44,13 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - sudo needs a password (since 2026-11-20 reboot) - Claude can't install units; user runs sudo commands
 - luna_camera.py: original prototype (superseded)
 
-## v1 features to build
-- 100 Hz reads; baseline auto-calibrated to target; count on "shorter than baseline - margin OR signal lost" for 2-3 frames; re-arm after ~0.3 s stable target; long blockages = one event
-- Camera: lock focus (AfMode Manual, LensPosition ~0.4 for ~2.5 m); reset serial buffer after capture; ms-precision filenames
-- CSV log per event: timestamp, distance, strength, photo; date folders on USB drive with SD fallback
-- systemd services: counter + UPS monitor (low-battery safe shutdown, auto restart on power return)
+## v1 features (DONE)
+- 100 Hz reads; auto-calibrated baseline; blocked = shorter than baseline - margin OR signal lost for N frames; re-arm after stable target; long blockage = one event
+- Camera: manual focus, ms filenames, capture on writer thread (no serial stall)
+- CSV per event in date folders on USB with SD fallback; maintenance merges SD days back to USB (tests/test_fallback.py)
+- systemd: counter, web, maintenance timer ENABLED. carcount-ups installed, NOT enabled (batteries)
+- Still to verify on hardware: RTC wake after shutdown (Pi 5 + POWER_OFF_ON_HALT=1); real mains-loss test once batteries are in
+- Tests: python3 tests/test_detector.py; python3 tests/test_fallback.py
 
 ## v2 / later
 - DONE: retention, daily/hourly summaries, health logging, watchdog, web page
