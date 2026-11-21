@@ -51,7 +51,7 @@ WRITER_STALL_S = 45         # a photo/CSV job running longer than this = hung ->
 LIVE_EVERY_S = 0.5          # live reading for the web Settings page
 
 # ---------------------------------------------------------------- tunable settings
-# MARGIN_CM, TRIGGER_FRAMES, REARM_S, MIN_AMP, NO_TARGET_TRIGGER_CM, CALIBRATE_S, REBASELINE_S,
+# COUNT_START, COUNT_STOP, PHOTO_START, PHOTO_STOP, MARGIN_CM, TRIGGER_FRAMES, REARM_S, MIN_AMP, NO_TARGET_TRIGGER_CM, CALIBRATE_S, REBASELINE_S,
 # STUCK_S, CAMERA_ENABLED, PHOTO_SIZE, LENS_POSITION, SHORT_EXPOSURE, HEALTH_EVERY_S, STATUS_EVERY_S
 # Defaults/limits: carcount_data.SETTINGS. Overrides: ~/.config/carcount/config.json (web Settings page).
 # Reloaded on SIGHUP; SIGUSR1 = recalibrate the baseline.
@@ -312,6 +312,7 @@ class Detector:
         self.snaps = {}
         self.last = (0, 0)           # latest (dist, amp) for the live view
         self.cal = []                # samples while calibrating, None when calibrated
+        self.sched = None            # (counting, photos) last logged, for change messages
 
     # ---------------------------------------------------------- calibration
     def recalibrate(self):
@@ -379,7 +380,14 @@ class Detector:
     # ---------------------------------------------------------- events
     def _start_event(self):
         t0, d0, a0 = self.pending[0]
-        today = datetime.fromtimestamp(t0).date()
+        when = datetime.fromtimestamp(t0)
+        if not cd.in_window(COUNT_START, COUNT_STOP, when):
+            # outside counting hours: track the blockage (so it isn't counted when the
+            # window opens mid-car, and stuck detection still works) but log nothing
+            self.event = {'t': t0, 't_last': self.pending[-1][0], 'min_dist': None, 'skip': True}
+            self._armed_off()
+            return
+        today = when.date()
         if today != self.count_day:
             self.count_day, self.count = today, 0
         self.count += 1
@@ -390,8 +398,12 @@ class Detector:
         self.event = {'t': t0, 't_last': self.pending[-1][0], 'count': self.count,
                       'dist': td, 'amp': ta, 'min_dist': min(dists) if dists else None,
                       'baseline': self.baseline}
-        self.writer.photo(self.event)
+        if cd.in_window(PHOTO_START, PHOTO_STOP, when):
+            self.writer.photo(self.event)
         log.info('Car #%d today  dist=%s cm amp=%s', self.count, td, ta)
+        self._armed_off()
+
+    def _armed_off(self):
         self.armed = False
         self.pending.clear()
         self.blocked_run = 0
@@ -405,7 +417,7 @@ class Detector:
             ev['min_dist'] = dist
 
     def _end_event(self):
-        if self.event:
+        if self.event and not self.event.get('skip'):
             self.writer.row(self.event)
             dur = self.event['t_last'] - self.event['t']
             if dur > 5:
@@ -457,6 +469,22 @@ class Detector:
             log.warning('Beam blocked for %.0f s (signal lost / unsteady) - check sensor and target', dur)
             self.stuck_warned = True
 
+    # ---------------------------------------------------------- schedule
+    def schedule(self):
+        """(counting, photos) right now per the Schedule settings."""
+        counting = cd.in_window(COUNT_START, COUNT_STOP)
+        return counting, counting and CAMERA_ENABLED and cd.in_window(PHOTO_START, PHOTO_STOP)
+
+    def log_schedule(self):
+        now = self.schedule()
+        if now == self.sched:
+            return
+        if self.sched is None or now[0] != self.sched[0]:
+            log.info('Counting %s (counting hours %s)', 'ON' if now[0] else 'PAUSED', hours(COUNT_START, COUNT_STOP))
+        if now[0] and CAMERA_ENABLED and (self.sched is None or now[1] != self.sched[1]):
+            log.info('Photos %s (photo hours %s)', 'ON' if now[1] else 'OFF', hours(PHOTO_START, PHOTO_STOP))
+        self.sched = now
+
     def delta(self, key):
         """(seconds, frames, valid, events) since the last call with this key."""
         now = time.monotonic()
@@ -474,11 +502,15 @@ class Detector:
     def live(self):
         d, a = self.last
         thr = (self.baseline - MARGIN_CM) if self.baseline is not None else NO_TARGET_TRIGGER_CM
-        return {'time': time.time(), 'dist': d, 'amp': a,
+        counting, photos = self.schedule()
+        return {'time': time.time(), 'dist': d, 'amp': a, 'counting': counting, 'photos': photos,
+                'count_hours': hours(COUNT_START, COUNT_STOP), 'photo_hours': hours(PHOTO_START, PHOTO_STOP),
                 'baseline': None if self.baseline is None else round(self.baseline, 1),
                 'threshold': round(thr), 'blocked': self.is_blocked(d, a) if self.n_frames else None,
-                'state': 'calibrating' if self.cal is not None else 'armed' if self.armed else 'in event',
-                'count': self.count, 'min_amp': MIN_AMP}
+                'state': 'calibrating' if self.cal is not None else ('armed' if counting else 'paused') if self.armed
+                else 'in event' if not self.event or not self.event.get('skip') else 'blocked (not counted)',
+                'count': self.count, 'min_amp': MIN_AMP,
+                'event_s': round(time.time() - self.event['t']) if self.event else 0}
 
     def health_row(self, sensor_errors):
         secs, fr, va, ev = self.delta('health')
@@ -486,6 +518,10 @@ class Detector:
                 'frames_per_s': _r(fr / max(secs, 1), 1), 'valid_pct': _r(100 * va / max(fr, 1), 1),
                 'baseline_cm': _r(self.baseline, 0), 'events': ev, 'sensor_errors': sensor_errors,
                 'lidar_temp_c': _r(sensor['temp'], 1) if fr else ''}
+
+
+def hours(start, stop):
+    return 'all day' if start == stop else f'{start}-{stop}'
 
 
 def _r(x, nd):
@@ -546,6 +582,7 @@ def run(args):
             det.recalibrate()
         if now - timers['live'] >= LIVE_EVERY_S:
             timers['live'] = now
+            det.log_schedule()
             write_live(det)
         if now - timers['ping'] >= WATCHDOG_PING_S:
             timers['ping'] = now

@@ -6,7 +6,7 @@ import json
 import os
 import re
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 USB_ROOT = Path('/mnt/carcount')
@@ -139,6 +139,14 @@ PHOTO_SIZES = ['1536x864', '2304x1296', '4608x2592']
 
 SETTINGS = [
     # key, group, label, type, default, min, max, apply, help
+    ('COUNT_START', 'Schedule', 'Start counting at', 'time', '00:00', None, None, 'live',
+     'Same start and stop time = count all day. Stop earlier than start = overnight (e.g. 22:00 to 06:00).'),
+    ('COUNT_STOP', 'Schedule', 'Stop counting at', 'time', '00:00', None, None, 'live',
+     'Outside these hours the beam is still watched (baseline kept up to date) but nothing is counted.'),
+    ('PHOTO_START', 'Schedule', 'Take photos from', 'time', '00:00', None, None, 'live',
+     'Photos are only taken for counted cars, so this applies within the counting hours.'),
+    ('PHOTO_STOP', 'Schedule', 'Take photos until', 'time', '00:00', None, None, 'live',
+     'Same start and stop time = photos all day (while "Take photos" is on).'),
     ('MARGIN_CM', 'Detection', 'Trigger margin (cm)', 'int', 30, 5, 400, 'live',
      'Beam counts as blocked when the distance is this much shorter than the baseline.'),
     ('TRIGGER_FRAMES', 'Detection', 'Frames to trigger', 'int', 3, 1, 50, 'live',
@@ -183,6 +191,24 @@ SETTINGS = [
      'Never shut down this soon after the monitor starts, so you can log in and fix things.'),
     ('UPS_WAKE_AFTER_MIN', 'Power', 'Wake up after shutdown (min)', 'int', 30, 0, 1440, 'ups',
      'RTC alarm to power the Pi back on; it keeps running if mains is back. 0 = stay off.'),
+    # Notifications: read by alerts.py (carcount-alerts.service) every check, no restart needed.
+    ('ALERT_PROBLEMS', 'Notifications', 'Problems', 'bool', True, None, None, 'alerts',
+     'Counter stopped, lidar or camera failure, beam blocked, USB drive missing, disk full, overheating.'),
+    ('ALERT_POWER', 'Notifications', 'Power', 'bool', True, None, None, 'alerts',
+     'Pi restarted (power cut?), mains lost/restored, battery low, low-battery shutdown.'),
+    ('ALERT_HIGHLIGHTS', 'Notifications', 'Highlights', 'bool', True, None, None, 'alerts',
+     'Record day, unusually busy hour, no cars for a long time in the daytime.'),
+    ('ALERT_SUMMARY', 'Notifications', 'Daily summary', 'bool', True, None, None, 'alerts', ''),
+    ('ALERT_SUMMARY_TIME', 'Notifications', 'Send daily summary at', 'time', '21:00', None, None, 'alerts', ''),
+    ('ALERT_QUIET_H', 'Notifications', 'No cars alert after (hours)', 'float', 3.0, 0, 24, 'alerts',
+     'Only between 07:00 and 20:00 and within counting hours. 0 = off.'),
+    ('ALERT_BUSY_FACTOR', 'Notifications', 'Busy hour = this many times usual', 'float', 2.0, 1.2, 10, 'alerts',
+     'Compared with the same hour over the last 14 days (needs a week of data, and at least 10 cars).'),
+    ('ALERT_BLOCKED_MIN', 'Notifications', 'Beam blocked alert after (min)', 'int', 15, 1, 1440, 'alerts', ''),
+    ('ALERT_CPU_TEMP', 'Notifications', 'CPU temperature alert (°C)', 'int', 80, 60, 90, 'alerts',
+     'The Pi 5 slows itself down from about 85 °C.'),
+    ('ALERT_BATTERY_PCT', 'Notifications', 'Battery low alert (%)', 'int', 30, 5, 90, 'alerts',
+     'On battery and at or below this charge.'),
 ]
 SETTING = {s[0]: dict(zip(('key', 'group', 'label', 'type', 'default', 'min', 'max', 'apply', 'help'), s))
            for s in SETTINGS}
@@ -196,6 +222,11 @@ def parse_setting(key, raw):
         return (raw if isinstance(raw, bool) else str(raw).lower() in ('1', 'true', 'on', 'yes')), None
     if t == 'choice':
         return (raw, None) if raw in PHOTO_SIZES else (s['default'], f'{s["label"]}: invalid choice')
+    if t == 'time':
+        m = re.fullmatch(r'\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*', str(raw))
+        if m and int(m[1]) < 24 and int(m[2]) < 60:
+            return f'{int(m[1]):02d}:{m[2]}', None
+        return s['default'], f'{s["label"]}: "{raw}" is not a time (HH:MM)'
     try:
         v = int(raw) if t == 'int' and float(raw) == int(float(raw)) else float(raw)
         if t == 'int' and v != int(v):
@@ -228,6 +259,37 @@ def save_settings(values):
     tmp = CONFIG_PATH.with_suffix('.tmp')
     tmp.write_text(json.dumps(data, indent=2) + '\n')
     tmp.replace(CONFIG_PATH)
+
+
+def in_window(start, stop, when=None):
+    """True if `when` (datetime, default now) is within start..stop ("HH:MM", stop exclusive).
+    start == stop means always; stop < start wraps past midnight."""
+    if start == stop:
+        return True
+    now = (when or datetime.now()).strftime('%H:%M')
+    return start <= now < stop if start < stop else now >= start or now < stop
+
+
+# Pushover credentials (secret - kept out of config.json and the repo)
+PUSHOVER_PATH = Path('/home/carcount/.config/carcount/pushover.json')
+ALERT_LOG = Path('/home/carcount/.local/share/carcount/alerts-log.jsonl')   # sent notifications
+
+
+def pushover_keys():
+    try:
+        d = json.loads(PUSHOVER_PATH.read_text())
+        return (d['user'], d['token']) if d.get('user') and d.get('token') else None
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def save_pushover_keys(user, token):
+    PUSHOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PUSHOVER_PATH.with_suffix('.tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as fh:
+        json.dump({'user': user, 'token': token}, fh)
+    tmp.replace(PUSHOVER_PATH)
 
 
 def live_state(max_age_s=3):
