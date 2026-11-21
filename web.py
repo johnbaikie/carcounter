@@ -114,19 +114,23 @@ def photo_url(path, kind='file'):
     return None
 
 
-def line_chart(values, labels, tips, label_every=1, height=170, upto=None):
+def line_chart(values, labels, tips, label_every=1, height=170, upto=None, ymax=None):
     """Single-series line chart as inline SVG. Hovering a column shows a guide line,
-    a marker and a tooltip (<title>). `upto` = number of points to draw (e.g. hours so far today)."""
+    a marker and a tooltip (<title>). `upto` = number of points to draw (e.g. hours so far
+    today); None values are gaps (no data); `ymax` fixes the top of the scale."""
     n = len(values)
     upto = n if upto is None else max(1, min(upto, n))
     W, H, left, right, top, bottom = 480, height, 28, 10, 10, 22
     pw, ph = W - left - right, H - top - bottom
-    vmax = max(values + [1])
-    step = max(1, -(-vmax // 4))           # ~4 gridlines, integer steps
-    ymax = step * -(-vmax // step)
+    if ymax is None:
+        vmax = max([v for v in values if v is not None] + [1])
+        step = max(1, -(-int(vmax) // 4))   # ~4 gridlines, integer steps
+        ymax = step * -(-int(vmax) // step)
+    else:
+        step = max(1, ymax // 4)
     col = pw / n
     xs = [left + col * (i + 0.5) for i in range(n)]
-    ys = [top + ph - ph * v / ymax for v in values]
+    ys = [None if v is None else top + ph - ph * min(v, ymax) / ymax for v in values]
     out = [f'<svg class="chart" viewBox="0 0 {W} {H}" role="img">']
     for v in range(0, ymax + 1, step):
         y = top + ph - ph * v / ymax
@@ -135,12 +139,28 @@ def line_chart(values, labels, tips, label_every=1, height=170, upto=None):
     out.append(f'<line class="axis" x1="{left}" x2="{W - right}" y1="{top + ph}" y2="{top + ph}"/>')
     for i in range(0, n, label_every):
         out.append(f'<text x="{xs[i]:.1f}" y="{H - 6}" text-anchor="middle">{esc(labels[i])}</text>')
-    pts = ' '.join(f'{xs[i]:.1f},{ys[i]:.1f}' for i in range(upto))
-    out.append(f'<polygon class="area" points="{xs[0]:.1f},{top + ph} {pts} {xs[upto - 1]:.1f},{top + ph}"/>')
-    out.append(f'<polyline class="line" points="{pts}"/>')
-    # latest point always marked; others appear on hover
-    out.append(f'<circle class="end" cx="{xs[upto - 1]:.1f}" cy="{ys[upto - 1]:.1f}" r="4"/>')
+    # one polyline per run of consecutive values (None = gap)
+    runs, cur = [], []
     for i in range(upto):
+        if ys[i] is None:
+            if cur:
+                runs.append(cur)
+            cur = []
+        else:
+            cur.append(i)
+    if cur:
+        runs.append(cur)
+    for run in runs:
+        pts = ' '.join(f'{xs[i]:.1f},{ys[i]:.1f}' for i in run)
+        out.append(f'<polygon class="area" points="{xs[run[0]]:.1f},{top + ph} {pts} {xs[run[-1]]:.1f},{top + ph}"/>')
+        out.append(f'<polyline class="line" points="{pts}"/>' if len(run) > 1 else
+                   f'<circle class="end" cx="{xs[run[0]]:.1f}" cy="{ys[run[0]]:.1f}" r="3"/>')
+    if runs:   # latest point always marked; others appear on hover
+        i = runs[-1][-1]
+        out.append(f'<circle class="end" cx="{xs[i]:.1f}" cy="{ys[i]:.1f}" r="4"/>')
+    for i in range(upto):
+        if ys[i] is None:
+            continue
         out.append(f'<g class="col"><title>{esc(tips[i])}</title>'
                    f'<line class="guide" x1="{xs[i]:.1f}" x2="{xs[i]:.1f}" y1="{top}" y2="{top + ph}"/>'
                    f'<circle class="pt" cx="{xs[i]:.1f}" cy="{ys[i]:.1f}" r="4"/>'
@@ -163,7 +183,8 @@ def status_badge(kind, text):
     return f'<span class="pill"><span class="dot" style="background:{color}"></span>{icon} {esc(text)}</span>'
 
 
-NAV = [('/', 'Today'), ('/days', 'All days'), ('/settings', 'Settings'), ('/summary.csv', 'summary.csv')]
+NAV = [('/', 'Today'), ('/days', 'All days'), ('/settings', 'Settings'), ('/power', 'Power'),
+       ('/summary.csv', 'summary.csv')]
 
 
 def page(title, body, refresh=None, active=None):
@@ -307,12 +328,16 @@ def fmt(v):
     return f'{v:g}' if isinstance(v, float) else str(v)
 
 
-def settings_page(values=None, errors=None, msg=None):
-    values = values or cd.load_settings()
-    errors = errors or {}
+APPLY_NOTE = {'live': 'applies immediately', 'restart': 'counter restarts (~5 s)',
+              'next run': 'applies at next hourly maintenance', 'ups': 'applies within a few seconds'}
+POWER_KEYS = [k for k, st in cd.SETTING.items() if st['group'] == 'Power']
+COUNTER_KEYS = [k for k in cd.SETTING if k not in POWER_KEYS]
+
+
+def settings_cards(keys, values, errors):
     groups = {}
-    for key, st in cd.SETTING.items():
-        v = values[key]
+    for key in keys:
+        st, v = cd.SETTING[key], values[key]
         if st['type'] == 'bool':
             inp = f'<input type="checkbox" name="{key}" id="{key}" value="1"{" checked" if v else ""}>'
         elif st['type'] == 'choice':
@@ -323,19 +348,32 @@ def settings_page(values=None, errors=None, msg=None):
             inp = (f'<input type="number" name="{key}" id="{key}" value="{esc(fmt(v))}" '
                    f'min="{st["min"]}" max="{st["max"]}" step="{step}" required>')
         default = 'on' if st['default'] is True else 'off' if st['default'] is False else fmt(st['default'])
-        note = {'live': 'applies immediately', 'restart': 'counter restarts (~5 s)',
-                'next run': 'applies at next hourly maintenance'}[st['apply']]
         help_ = f'{esc(st["help"])} ' if st['help'] else ''
         err = f'<div class="err">✕ {esc(errors[key])}</div>' if key in errors else ''
         groups.setdefault(st['group'], []).append(
             f'<div class="field"><label for="{key}">{esc(st["label"])}</label>{inp}'
-            f'<div class="help">{help_}<span class="muted">Default {esc(default)} · {note}</span></div>{err}</div>')
-    form = ''.join(f'<div class="card"><h2>{esc(g)}</h2><fieldset>{"".join(f)}</fieldset></div>'
+            f'<div class="help">{help_}<span class="muted">Default {esc(default)} · {APPLY_NOTE[st["apply"]]}</span></div>{err}</div>')
+    return ''.join(f'<div class="card"><h2>{esc(g)}</h2><fieldset>{"".join(f)}</fieldset></div>'
                    for g, f in groups.items())
-    banner = f'<div class="msg">{esc(msg)}</div>' if msg else ''
+
+
+def banner(msg, errors):
     if errors:
-        banner = f'<div class="msg">{status_badge("bad", "Not saved - fix the highlighted values")}</div>'
-    body = f"""{banner}
+        return f'<div class="msg">{status_badge("bad", "Not saved - fix the highlighted values")}</div>'
+    return f'<div class="msg">{esc(msg)}</div>' if msg else ''
+
+
+def settings_form(action, keys, values, errors, title):
+    return f"""<form method="post" action="{action}">{settings_cards(keys, values, errors)}
+<div class="buttons"><button class="primary" type="submit">Save &amp; apply</button>
+<button type="submit" formaction="{action}/reset" onclick="return confirm('Reset {title} to defaults?')">Reset to defaults</button></div>
+</form>"""
+
+
+def settings_page(values=None, errors=None, msg=None):
+    values = values or cd.load_settings()
+    errors = errors or {}
+    body = f"""{banner(msg, errors)}
 <div class="card"><h2>Live beam reading</h2>
 <div class="hero"><div><div class="live" id="l-dist">—</div><div class="sub">distance</div></div>
 <div><div class="live" id="l-amp">—</div><div class="sub">strength</div></div>
@@ -345,10 +383,8 @@ def settings_page(values=None, errors=None, msg=None):
 <form method="post" action="/recalibrate" class="buttons" style="margin-top:4px">
 <button type="submit">Recalibrate baseline</button>
 <span class="muted" style="align-self:center">Keep the beam clear for the calibration time.</span></form></div>
-<form method="post" action="/settings">{form}
-<div class="buttons"><button class="primary" type="submit">Save &amp; apply</button>
-<button type="submit" formaction="/settings/reset" onclick="return confirm('Reset all settings to defaults?')">Reset to defaults</button></div>
-</form>
+{settings_form('/settings', COUNTER_KEYS, values, errors, 'counter settings')}
+<p class="muted">UPS / battery settings are on the <a href="/power">Power</a> page.</p>
 <script>
 async function poll() {{
   try {{
@@ -371,30 +407,196 @@ poll(); setInterval(poll, 500);
     return page('Settings', body, active='/settings')
 
 
-def handle_settings_post(form):
-    values, errors = {}, {}
-    for key, st in cd.SETTING.items():
+def save_from_form(form, keys):
+    """Validate the posted keys; save on success. Returns (values, errors, changed_keys)."""
+    values = cd.load_settings()
+    old = dict(values)
+    errors = {}
+    for key in keys:
+        st = cd.SETTING[key]
         raw = form.get(key, [''])[0] if st['type'] != 'bool' else (key in form)
         v, err = cd.parse_setting(key, raw)
         values[key] = raw if err and st['type'] not in ('bool', 'choice') else v
         if err:
             errors[key] = err
     if errors:
-        return settings_page(values, errors), None
-    old = cd.load_settings()
+        return values, errors, []
+    changed = [k for k in keys if values[k] != old[k]]
+    if changed:
+        cd.save_settings(values)
+    return values, errors, changed
+
+
+def reset_settings(keys):
+    values = cd.load_settings()
+    changed = [k for k in keys if values[k] != cd.SETTING[k]['default']]
+    for k in keys:
+        values[k] = cd.SETTING[k]['default']
     cd.save_settings(values)
-    changed = [cd.SETTING[k]['label'] for k in values if values[k] != old[k]]
+    return changed
+
+
+def apply_message(changed):
     if not changed:
-        return None, 'No changes.'
-    err = signal_counter(signal.SIGHUP)
-    msg = 'Saved: ' + ', '.join(changed) + '.'
-    if err:
-        msg += f' Note: {err}.'
-    elif any(cd.SETTING[k]['apply'] == 'restart' for k in values if values[k] != old[k]):
-        msg += ' The counter is restarting to apply camera changes.'
+        return 'No changes.'
+    msg = 'Saved: ' + ', '.join(cd.SETTING[k]['label'] for k in changed) + '.'
+    counter = [k for k in changed if k in COUNTER_KEYS]
+    if counter:
+        err = signal_counter(signal.SIGHUP)
+        if err:
+            return msg + f' Note: {err}.'
+        if any(cd.SETTING[k]['apply'] == 'restart' for k in counter):
+            return msg + ' The counter is restarting to apply camera changes.'
+    if any(k in POWER_KEYS for k in changed) and not ups_service()['active']:
+        return msg + ' The UPS monitor is not running - they apply when it starts.'
+    return msg + ' Applied.'
+
+
+# ---------------------------------------------------------------- power
+def ups_service():
+    def q(cmd):
+        try:
+            return subprocess.run(['systemctl', cmd, 'carcount-ups'], capture_output=True,
+                                  text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return 'unknown'
+    return {'active': q('is-active') == 'active', 'enabled': q('is-enabled') == 'enabled'}
+
+
+def read_ups_direct():
+    """Read the UPS ourselves when ups_monitor isn't running (carcount is in the gpio and i2c groups)."""
+    try:
+        import gpiod
+        import smbus2
+        import ups_monitor as um
+        with gpiod.request_lines(um.GPIOCHIP, consumer='carcount-web',
+                                 config={um.PLD_PIN: gpiod.LineSettings(direction=gpiod.line.Direction.INPUT)}) as r:
+            ac = r.get_value(um.PLD_PIN) == gpiod.line.Value.ACTIVE
+        with smbus2.SMBus(um.I2C_BUS) as bus:
+            volts, pct = um.read_gauge(bus)
+        return {'ac': ac, 'volts': round(volts, 3), 'pct': round(pct, 1), 'direct': True}
+    except Exception:
+        return None
+
+
+def input_voltage():
+    try:
+        out = subprocess.run(['vcgencmd', 'pmic_read_adc', 'EXT5V_V'], capture_output=True,
+                             text=True, timeout=3).stdout
+        return float(re.search(r'=([\d.]+)V', out)[1])
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+
+
+def dur(s):
+    s = int(s)
+    return f'{s // 3600} h {s % 3600 // 60} min' if s >= 3600 else f'{s // 60} min {s % 60} s'
+
+
+def power_card():
+    svc = ups_service()
+    st = cd.ups_state()
+    if not st:
+        st = read_ups_direct()
+    vin = input_voltage()
+    if not st:
+        badge = status_badge('bad', 'Cannot read the UPS (I2C/GPIO error)')
+    elif st.get('pending') and st.get('shutdown_enabled'):
+        badge = status_badge('bad', f'Shutdown pending: {st["pending"]}')
+    elif not st['ac']:
+        badge = status_badge('warn', 'On battery - mains power lost' +
+                             (f' {dur(st["on_battery_s"])} ago' if st.get('on_battery_s') else ''))
     else:
-        msg += ' Applied.'
-    return None, msg
+        badge = status_badge('good', 'On mains power')
+
+    def stat(label, val):
+        return f'<div><span>{label}</span>{esc(val) if val not in ("", None) else "—"}</div>'
+    if svc['active']:
+        mon = 'running' + ('' if svc['enabled'] else ' (not enabled at boot)')
+        shut = ('enabled' if st and st.get('shutdown_enabled') else 'disabled (log only)')
+        if st and st.get('grace_left_s'):
+            shut += f' · grace {st["grace_left_s"]} s left'
+    else:
+        mon = 'not running' + (' (enabled)' if svc['enabled'] else '')
+        shut = 'inactive (monitor not running)'
+    stats = ''.join([
+        stat('Power source', None if not st else 'Mains' if st['ac'] else 'Battery'),
+        stat('Battery voltage', None if not st or st.get('volts') is None else f'{st["volts"]:.2f} V'),
+        stat('Battery charge', None if not st or st.get('pct') is None else f'{st["pct"]:.0f} %'),
+        stat('Pi input voltage', None if vin is None else f'{vin:.2f} V'),
+        stat('UPS monitor', mon),
+        stat('Low-battery shutdown', shut),
+    ])
+    notes = []
+    if st and st.get('direct'):
+        notes.append('Read directly by the web page because the UPS monitor is not running.')
+    notes.append('Battery voltage and charge are only meaningful with batteries installed.')
+    if vin is not None and vin < 4.9:
+        notes.append(f'Input voltage is low ({vin:.2f} V) - check the extension cord and power supply.')
+    if not svc['active']:
+        notes.append('After testing the batteries, start the monitor with: '
+                     'sudo systemctl enable --now carcount-ups')
+    return (f'<h2>UPS status <span class="muted">· {datetime.now():%H:%M:%S}</span></h2><p>{badge}</p>'
+            f'<div class="stats">{stats}</div>' + ''.join(f'<p class="muted">{esc(n)}</p>' for n in notes))
+
+
+def battery_chart():
+    rows = [r for r in cd.health(cd.today()) if r.get('battery_pct')]
+    if not rows:
+        return '<p class="muted">No battery history yet - it is logged once the UPS monitor is running.</p>'
+    buckets = [[] for _ in range(144)]          # 10-minute buckets
+    for r in rows:
+        t = r['timestamp']
+        try:
+            buckets[int(t[11:13]) * 6 + int(t[14:16]) // 10].append(float(r['battery_pct']))
+        except (ValueError, IndexError):
+            pass
+    vals = [round(sum(b) / len(b)) if b else None for b in buckets]
+    labels = [f'{i // 6:02d}' for i in range(144)]
+    tips = [f'{i // 6:02d}:{i % 6 * 10:02d} · {v} %' if v is not None else '' for i, v in enumerate(vals)]
+    now = datetime.now()
+    return line_chart(vals, labels, tips, label_every=18, ymax=100,
+                      upto=now.hour * 6 + now.minute // 10 + 1)
+
+
+def power_events(limit=25):
+    try:
+        out = subprocess.run(['journalctl', '-u', 'carcount-ups', '--since', '-14 days', '-o', 'cat',
+                              '--no-pager'], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return '<p class="muted">Could not read the system journal.</p>'
+    keep = ('Power ', 'SHUTDOWN', 'Battery low', 'Would shut down', 'Started:', 'Setting UPS_',
+            'gauge read failed', 'wake alarm')
+    lines = [ln for ln in out.splitlines() if any(k in ln for k in keep)][-limit:]
+    if not lines:
+        return '<p class="muted">No power events logged in the last 14 days.</p>'
+    rows = []
+    for ln in reversed(lines):
+        ts, _, rest = ln.partition(',')
+        msg = rest.split(' ', 2)[-1] if rest else ln
+        rows.append(f'<tr><td style="white-space:nowrap">{esc(ts[:16])}</td><td>{esc(msg)}</td></tr>')
+    return '<table><tr><th>Time</th><th>Event</th></tr>' + ''.join(rows) + '</table>'
+
+
+def power_page(values=None, errors=None, msg=None):
+    values = values or cd.load_settings()
+    errors = errors or {}
+    body = f"""{banner(msg, errors)}
+<div class="card" id="power-card">{power_card()}</div>
+<div class="row"><div class="card"><h2>Battery charge · today (%)</h2>{battery_chart()}</div>
+<div class="card"><h2>Power events · last 14 days</h2>{power_events()}</div></div>
+{settings_form('/power', POWER_KEYS, values, errors, 'power settings')}
+<p class="muted">Shutdown only ever happens while running on battery. On mains power the Pi is never shut down,
+whatever these settings say.</p>
+<script>
+setInterval(async () => {{
+  try {{
+    const r = await fetch('/api/power-card', {{cache: 'no-store'}});
+    if (r.ok) document.getElementById('power-card').innerHTML = await r.text();
+  }} catch (e) {{}}
+}}, 3000);
+</script>"""
+    return page('Power', body, active='/power')
 
 
 # ---------------------------------------------------------------- files
@@ -435,6 +637,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/settings':
                 q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
                 return self.send_html(settings_page(msg=q.get('msg', [None])[0]))
+            if path == '/power':
+                q = parse_qs(self.path.split('?', 1)[1]) if '?' in self.path else {}
+                return self.send_html(power_page(msg=q.get('msg', [None])[0]))
+            if path == '/api/power-card':
+                return self.send_html(power_card())
             if path == '/api/live':
                 data = json.dumps(cd.live_state() or {}).encode()
                 self.send_response(200)
@@ -465,13 +672,15 @@ class Handler(BaseHTTPRequestHandler):
         try:
             n = min(int(self.headers.get('Content-Length') or 0), 100_000)
             form = parse_qs(self.rfile.read(n).decode(errors='replace'), keep_blank_values=True)
-            if self.path == '/settings':
-                html_, msg = handle_settings_post(form)
-                return self.send_html(html_) if html_ else self.redirect('/settings?msg=' + quote(msg))
-            if self.path == '/settings/reset':
-                cd.save_settings({})
-                err = signal_counter(signal.SIGHUP)
-                return self.redirect('/settings?msg=' + quote('All settings reset to defaults.' + (f' Note: {err}.' if err else '')))
+            for base, keys, page_fn in (('/settings', COUNTER_KEYS, settings_page), ('/power', POWER_KEYS, power_page)):
+                if self.path == base:
+                    values, errors, changed = save_from_form(form, keys)
+                    if errors:
+                        return self.send_html(page_fn(values, errors))
+                    return self.redirect(f'{base}?msg=' + quote(apply_message(changed)))
+                if self.path == base + '/reset':
+                    changed = reset_settings(keys)
+                    return self.redirect(f'{base}?msg=' + quote('Reset to defaults. ' + apply_message(changed)))
             if self.path == '/recalibrate':
                 err = signal_counter(signal.SIGUSR1)
                 return self.redirect('/settings?msg=' + quote(err or 'Recalibrating - keep the beam clear.'))

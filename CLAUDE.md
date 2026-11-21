@@ -30,11 +30,13 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
   SIGUSR1 = recalibrate. Writes /dev/shm/carcount-live.json 2x/s. `-v` prints frames, `--no-camera`.
   Output: <root>/YYYY-MM-DD/{events.csv,health.csv,photos/,thumbs/}. Photos/CSV/health on a writer thread.
   health.csv every 60 s (fps, valid%, baseline, lidar/CPU temp, fan rpm, throttled, disk, camera, UPS). sd_notify watchdog.
-- ups_monitor.py: PLD + fuel gauge; shuts down only when on battery AND low; sets RTC wakealarm (+30 min) first.
-  Writes /run/carcount-ups.json for the health log. `--once`, `--dry-run`
+- ups_monitor.py: PLD + fuel gauge; shuts down only when on battery AND (low for N reads OR max time on battery);
+  sets RTC wakealarm first. UPS_* settings re-read from config.json when it changes (runs as root, no signal needed).
+  Writes /run/carcount-ups.json (state, pending shutdown, grace). `--once`, `--dry-run`
 - maintenance.py (hourly timer): SD fallback -> USB merge, photo retention (365 d / min free GB), summary_daily.csv
 - web.py: LAN page on port 8080 (no auth): today, status, hourly/14-day line charts, photos, /day/<date>, /days,
-  /settings (live beam reading, edit settings -> signals counter, recalibrate button)
+  /settings (live beam reading, edit settings -> signals counter, recalibrate button),
+  /power (UPS status - direct GPIO/I2C read if monitor not running, input voltage, battery chart, power events from journal, UPS_* settings)
 - Deploy code changes without sudo: kill $(systemctl show -p MainPID --value carcount[-web]) (Restart=always)
 - systemd/: carcount.service (Type=notify, WatchdogSec=60), carcount-web.service, carcount-maintenance.{service,timer},
   carcount-ups.service (NOT enabled until batteries tested). Logs: journalctl -u carcount -f

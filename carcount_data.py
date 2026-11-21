@@ -168,6 +168,21 @@ SETTINGS = [
      '0 = keep until the disk is nearly full. CSV logs are always kept.'),
     ('MIN_FREE_GB_USB', 'Storage', 'Minimum free space on USB (GB)', 'float', 5.0, 1, 100, 'next run',
      'Oldest photos are deleted to keep at least this much free.'),
+    # Power: read by ups_monitor.py (runs as root), which re-reads the config file within a few seconds.
+    ('UPS_SHUTDOWN_ENABLED', 'Power', 'Shut down on low battery', 'bool', True, None, None, 'ups',
+     'Off = only log what would happen (use while testing new batteries).'),
+    ('UPS_LOW_VOLTAGE', 'Power', 'Low battery voltage (V per cell)', 'float', 3.20, 3.0, 3.7, 'ups',
+     'On battery and below this voltage counts as low. 18650 cells are nearly empty around 3.2 V.'),
+    ('UPS_LOW_PERCENT', 'Power', 'Low battery charge (%)', 'int', 10, 0, 90, 'ups',
+     'On battery and below this charge counts as low. 0 = use voltage only.'),
+    ('UPS_LOW_COUNT', 'Power', 'Low readings before shutdown', 'int', 5, 1, 60, 'ups',
+     'Consecutive low readings (2 s apart) required, so a brief dip does not shut down.'),
+    ('UPS_MAX_ON_BATTERY_MIN', 'Power', 'Shut down after on battery (min)', 'int', 0, 0, 1440, 'ups',
+     'Shut down after this long without mains even if the battery is not low. 0 = off.'),
+    ('UPS_BOOT_GRACE_S', 'Power', 'Grace period after boot (s)', 'int', 120, 30, 1800, 'ups',
+     'Never shut down this soon after the monitor starts, so you can log in and fix things.'),
+    ('UPS_WAKE_AFTER_MIN', 'Power', 'Wake up after shutdown (min)', 'int', 30, 0, 1440, 'ups',
+     'RTC alarm to power the Pi back on; it keeps running if mains is back. 0 = stay off.'),
 ]
 SETTING = {s[0]: dict(zip(('key', 'group', 'label', 'type', 'default', 'min', 'max', 'apply', 'help'), s))
            for s in SETTINGS}
