@@ -58,3 +58,6 @@ Paths assume user `carcount` with the code in `/home/carcount/src`.
 - Run by hand (stop the service first): `python3 carcounter.py -v` prints every reading
 - Settings are edited on the web Settings page and stored in `~/.config/carcount/config.json`;
   the counter reloads on `SIGHUP` and recalibrates on `SIGUSR1`.
+
+## License
+MIT - see [LICENSE](LICENSE).
