@@ -23,6 +23,7 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - Still measuring: exact distances, mount height (~50-60 cm), camera placement
 
 ## Current code
+- Repo: https://github.com/johnbaikie/carcounter (PUBLIC - never commit photos, logs, config.json or secrets)
 - carcount_data.py: shared paths (USB_ROOT /mnt/carcount, SD_ROOT ~/carcount_data), CSV fields, readers,
   and SETTINGS (tunable defaults/limits). Overrides in ~/.config/carcount/config.json (only non-defaults stored)
 - carcounter.py: v1 counter. Tunables from settings; SIGHUP = reload (camera size/enable -> self-exit, systemd restarts),
