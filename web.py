@@ -38,9 +38,13 @@ CSS = """
 body{margin:0;background:var(--page);color:var(--ink);font:15px/1.45 system-ui,-apple-system,sans-serif}
 main{max-width:1100px;margin:0 auto;padding:16px}
 a{color:var(--link)}
-header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 20px;margin-bottom:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;margin-bottom:16px}
 header h1{font-size:20px;margin:0}
-nav a{margin-right:14px}
+nav{display:flex;flex-wrap:wrap;gap:8px}
+nav a{display:inline-block;padding:7px 14px;border-radius:8px;border:1px solid var(--axis);
+background:var(--surface);color:var(--ink);font-weight:600;text-decoration:none}
+nav a:hover{border-color:var(--bar)}
+nav a.active{background:var(--bar);border-color:var(--bar);color:#fff}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
 .card h2{font-size:15px;margin:0 0 10px;color:var(--ink2);font-weight:600}
 .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
@@ -159,12 +163,16 @@ def status_badge(kind, text):
     return f'<span class="pill"><span class="dot" style="background:{color}"></span>{icon} {esc(text)}</span>'
 
 
-def page(title, body, refresh=None):
+NAV = [('/', 'Today'), ('/days', 'All days'), ('/settings', 'Settings'), ('/summary.csv', 'summary.csv')]
+
+
+def page(title, body, refresh=None, active=None):
+    nav = ''.join(f'<a href="{u}"{' class="active" aria-current="page"' if u == active else ''}>{t}</a>' for u, t in NAV)
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ''
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">{meta}<title>{esc(title)}</title>
 <style>{CSS}</style></head><body><main>
-<header><h1>Car counter</h1><nav><a href="/">Today</a><a href="/days">All days</a><a href="/settings">Settings</a><a href="/summary.csv">summary.csv</a></nav></header>
+<header><h1>Car counter</h1><nav>{nav}</nav></header>
 {body}</main></body></html>"""
 
 
@@ -244,7 +252,7 @@ def dashboard():
 <div class="row"><div class="card"><h2>Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
 <div class="card"><h2>Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
 <div class="card"><h2>Latest photos</h2>{photos_grid(recent, 12)}</div>"""
-    return page('Car counter', body, refresh=60)
+    return page('Car counter', body, refresh=60, active='/')
 
 
 def day_page(d):
@@ -276,7 +284,7 @@ def days_page():
                     f'<td>{f"{peak:02d}:00 ({h[peak]})" if peak is not None else "—"}</td></tr>')
     body = ('<div class="card"><h2>All days</h2><table><tr><th>Date</th><th>Cars</th><th>Busiest hour</th></tr>'
             + ''.join(rows) + '</table></div>')
-    return page('All days', body)
+    return page('All days', body, active='/days')
 
 
 def signal_counter(sig):
@@ -360,7 +368,7 @@ async function poll() {{
 }}
 poll(); setInterval(poll, 500);
 </script>"""
-    return page('Settings', body)
+    return page('Settings', body, active='/settings')
 
 
 def handle_settings_post(form):
