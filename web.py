@@ -85,6 +85,14 @@ th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--grid);verti
 th{color:var(--muted);font-weight:600;font-size:13px}
 td img{width:160px;border-radius:4px;display:block}
 .muted{color:var(--muted)}
+.viewer img{display:block;width:100%;max-height:75vh;object-fit:contain;background:#000;border-radius:8px}
+.vbar{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.vtitle{flex:1;text-align:center;display:flex;flex-direction:column;gap:2px}
+.navbtn{display:inline-block;padding:10px 16px;border-radius:8px;border:1px solid var(--axis);background:var(--surface);
+color:var(--ink);font-weight:600;text-decoration:none;white-space:nowrap}
+.navbtn:hover{border-color:var(--bar)}
+.navbtn.disabled{opacity:.35}
+@media (max-width:600px){.vbar{flex-wrap:wrap}.vtitle{order:-1;flex-basis:100%}.navbtn{flex:1;text-align:center}}
 .msg{padding:10px 14px;border-radius:8px;margin-bottom:16px;border:1px solid var(--border);background:var(--surface)}
 fieldset{border:0;padding:0;margin:0}
 .field{display:grid;grid-template-columns:minmax(180px,260px) 140px 1fr;gap:4px 14px;align-items:center;
@@ -247,13 +255,79 @@ def health_card():
            f'<p>{badge}</p><div class="stats">{stats}</div></div>'
 
 
+def view_url(e):
+    return f'/view/{e["timestamp"][:10]}/{Path(e["photo"]).name}'
+
+
+def day_photos(day):
+    """Events of a day that still have a photo on disk, oldest first."""
+    return [e for e in cd.events(day) if photo_url(e.get('photo'))]
+
+
+def neighbour(day, step):
+    """First/last photo event on the nearest earlier (step=-1) or later (+1) day that has photos."""
+    days = cd.all_days()
+    others = [d for d in days if (d < day if step < 0 else d > day)]
+    for d in (reversed(others) if step < 0 else others):
+        ph = day_photos(d)
+        if ph:
+            return ph[-1] if step < 0 else ph[0]
+    return None
+
+
+def view_page(day, name):
+    photos = day_photos(day)
+    idx = next((i for i, e in enumerate(photos) if Path(e['photo']).name == name), None)
+    if idx is None:
+        return None
+    e = photos[idx]
+    prev = photos[idx - 1] if idx > 0 else neighbour(day, -1)
+    nxt = photos[idx + 1] if idx + 1 < len(photos) else neighbour(day, +1)
+
+    def nav(ev, label, key):
+        if not ev:
+            return f'<span class="navbtn disabled" aria-disabled="true">{label}</span>'
+        return f'<a class="navbtn" id="{key}" href="{view_url(ev)}" title="{esc(ev["timestamp"][:19].replace("T", " "))}">{label}</a>'
+    dt = datetime.fromisoformat(e['timestamp'])
+    details = ' · '.join(x for x in [
+        f'Car #{e["count_today"]}', f'{e["distance_cm"]} cm' if e.get('distance_cm') else '',
+        f'blocked {e["duration_s"]} s' if e.get('duration_s') else '',
+        f'photo {idx + 1} of {len(photos)} this day'] if x)
+    preload = ''.join(f'<link rel="prefetch" href="{photo_url(ev["photo"])}">' for ev in (prev, nxt) if ev)
+    body = f"""{preload}
+<div class="viewer">
+<div class="vbar">{nav(prev, '◀ Earlier', 'prev')}
+<div class="vtitle"><strong>{dt:%a %d %b %Y · %H:%M:%S}</strong><span class="muted">{esc(details)}</span></div>
+{nav(nxt, 'Later ▶', 'next')}</div>
+<a href="{photo_url(e['photo'])}" title="Open full-size image"><img id="photo" src="{photo_url(e['photo'])}" alt="Car at {dt:%H:%M:%S}"></a>
+<p class="muted"><a href="/day/{day}">← Back to {dt:%a %d %b}</a> · Arrow keys or swipe to move · Esc for the day page</p>
+</div>
+<script>
+document.addEventListener('keydown', ev => {{
+  if (ev.key === 'ArrowLeft' && document.getElementById('prev')) location.href = document.getElementById('prev').href;
+  if (ev.key === 'ArrowRight' && document.getElementById('next')) location.href = document.getElementById('next').href;
+  if (ev.key === 'Escape') location.href = '/day/{day}';
+}});
+let x0 = null;
+const img = document.getElementById('photo');
+img.addEventListener('touchstart', ev => {{ x0 = ev.touches[0].clientX; }}, {{passive: true}});
+img.addEventListener('touchend', ev => {{
+  if (x0 === null) return;
+  const dx = ev.changedTouches[0].clientX - x0; x0 = null;
+  const a = document.getElementById(dx > 0 ? 'prev' : 'next');
+  if (Math.abs(dx) > 50 && a) {{ ev.preventDefault(); location.href = a.href; }}
+}});
+</script>"""
+    return page(f'Car {dt:%Y-%m-%d %H:%M:%S}', body)
+
+
 def photos_grid(evs, limit=None):
     items = []
     for e in reversed(evs):
         t = photo_url(e.get('photo'), 'thumb')
         if not t:
             continue
-        full = photo_url(e['photo'])
+        full = view_url(e)
         items.append(f'<figure><a href="{full}"><img loading="lazy" src="{t}" alt="Car at {esc(e["timestamp"][11:19])}"></a>'
                      f'<figcaption>{esc(e["timestamp"][11:19])} · #{esc(e["count_today"])}</figcaption></figure>')
         if limit and len(items) >= limit:
@@ -292,7 +366,7 @@ def day_page(d):
     rows = []
     for e in reversed(evs):
         t = photo_url(e.get('photo'), 'thumb')
-        img = f'<a href="{photo_url(e["photo"])}"><img loading="lazy" src="{t}" alt=""></a>' if t else '<span class="muted">—</span>'
+        img = f'<a href="{view_url(e)}"><img loading="lazy" src="{t}" alt=""></a>' if t else '<span class="muted">—</span>'
         rows.append(f'<tr><td>{esc(e["count_today"])}</td><td>{esc(e["timestamp"][11:23])}</td>'
                     f'<td>{esc(e["distance_cm"])} cm</td><td>{esc(e["strength"])}</td>'
                     f'<td>{esc(e["duration_s"])} s</td><td>{img}</td></tr>')
@@ -724,6 +798,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
                 return self.wfile.write(data)
+            m = re.fullmatch(r'/view/(\d{4}-\d{2}-\d{2})/([\w.-]+\.jpg)', path)
+            if m:
+                html_ = view_page(m[1], m[2])
+                return self.send_html(html_) if html_ else self.send_error(404, 'Photo not found')
             m = re.fullmatch(r'/day/(\d{4}-\d{2}-\d{2})', path)
             if m:
                 return self.send_html(day_page(m[1]))

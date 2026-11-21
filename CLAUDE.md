@@ -37,6 +37,7 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - carcount_db.py: derived SQLite copy at ~/.local/share/carcount/carcount.db (ext4, WAL), incremental by file size/mtime,
   auto-rebuild on schema change or corruption. CSVs stay the source of truth. Web does not use it yet.
 - web.py: LAN page on port 8080 (no auth): today, status, hourly/14-day line charts, photos, /day/<date>, /days,
+  /view/<day>/<photo> (photo viewer: earlier/later buttons, arrow keys, swipe, crosses days),
   /settings (live beam reading, edit settings -> signals counter, recalibrate button),
   /power (UPS status - direct GPIO/I2C read if monitor not running, input voltage, battery chart, power events from journal, UPS_* settings)
 - Deploy code changes: Settings page > System card Restart buttons (import-check first), or
