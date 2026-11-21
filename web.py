@@ -56,7 +56,8 @@ nav a:hover{border-color:var(--bar)}
 nav a.active{background:var(--bar);border-color:var(--bar);color:#fff}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
 .card h2{font-size:15px;margin:0 0 10px;color:var(--ink2);font-weight:600}
-.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px}
+.row>.card{margin-bottom:0}
 .hero{display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end}
 .hero .big{font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
 .hero .sub{color:var(--ink2)}
@@ -65,7 +66,7 @@ nav a.active{background:var(--bar);border-color:var(--bar);color:#fff}
 .stats span{display:block;color:var(--muted);font-size:12px}
 .pill{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
-svg.chart{width:100%;height:auto;display:block}
+svg.chart{width:100%;max-width:720px;height:auto;display:block}
 svg .grid{stroke:var(--grid);stroke-width:1}
 svg .axis{stroke:var(--axis);stroke-width:1}
 svg text{fill:var(--muted);font-size:12px;font-family:inherit}
@@ -108,7 +109,21 @@ background:var(--surface);color:var(--ink);cursor:pointer}
 button.primary{background:var(--bar);border-color:var(--bar);color:#fff}
 .buttons{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
 .live{font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
-@media (max-width:600px){.field{grid-template-columns:1fr}}
+@media (max-width:600px){
+.field{grid-template-columns:1fr}
+input[type=number],select{font-size:16px}   /* iOS zooms into inputs below 16px */
+main{padding:12px}
+.card{padding:14px}
+.hero{gap:20px}
+.hero .big{font-size:48px}
+table.events tr.head{display:none}
+table.events tr{display:grid;grid-template-columns:128px 1fr 1fr;gap:2px 10px;padding:10px 0;
+border-bottom:1px solid var(--grid)}
+table.events td{border:0;padding:0;font-size:14px}
+table.events td.ph{grid-row:1/span 3;grid-column:1}
+table.events td.ph img{width:128px}
+table.events td[data-label]::before{content:attr(data-label);display:block;color:var(--muted);font-size:11px}
+}
 """
 
 
@@ -208,7 +223,11 @@ def page(title, body, refresh=None, active=None):
     nav = ''.join(f'<a href="{u}"{' class="active" aria-current="page"' if u == active else ''}>{t}</a>' for u, t in NAV)
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ''
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">{meta}<title>{esc(title)}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Car Counter">{meta}<title>{esc(title)}</title>
 <style>{CSS}</style></head><body><main>
 <header><h1>Car Counter</h1><nav>{nav}</nav></header>
 {body}</main></body></html>"""
@@ -367,10 +386,10 @@ def day_page(d):
     for e in reversed(evs):
         t = photo_url(e.get('photo'), 'thumb')
         img = f'<a href="{view_url(e)}"><img loading="lazy" src="{t}" alt=""></a>' if t else '<span class="muted">—</span>'
-        rows.append(f'<tr><td>{esc(e["count_today"])}</td><td>{esc(e["timestamp"][11:23])}</td>'
-                    f'<td>{esc(e["distance_cm"])} cm</td><td>{esc(e["strength"])}</td>'
-                    f'<td>{esc(e["duration_s"])} s</td><td>{img}</td></tr>')
-    table = ('<table><tr><th>#</th><th>Time</th><th>Distance</th><th>Strength</th><th>Blocked for</th><th>Photo</th></tr>'
+        rows.append(f'<tr><td data-label="#">{esc(e["count_today"])}</td><td data-label="Time">{esc(e["timestamp"][11:23])}</td>'
+                    f'<td data-label="Distance">{esc(e["distance_cm"])} cm</td><td data-label="Strength">{esc(e["strength"])}</td>'
+                    f'<td data-label="Blocked for">{esc(e["duration_s"])} s</td><td class="ph">{img}</td></tr>')
+    table = ('<table class="events"><tr class="head"><th>#</th><th>Time</th><th>Distance</th><th>Strength</th><th>Blocked for</th><th>Photo</th></tr>'
              + ''.join(rows) + '</table>') if rows else '<p class="muted">No cars logged.</p>'
     body = f"""<p><a href="/day/{prev}">← {prev:%a %d %b}</a> &nbsp; <a href="/day/{nxt}">{nxt:%a %d %b} →</a></p>
 <div class="card"><h2>{dt:%A %d %B %Y} · {len(evs)} cars</h2>{hourly_chart(evs, d)}</div>
