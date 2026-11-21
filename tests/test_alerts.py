@@ -156,11 +156,17 @@ a.check()
 take()
 
 # restart after a power cut
-a.state['last_seen'] = (NOW[0] - timedelta(minutes=45)).timestamp()
+a.prev_seen = (NOW[0] - timedelta(minutes=45)).timestamp()
+alerts.clock_synced = lambda: False
+alerts.Path = lambda p: type('P', (), {'read_text': lambda self: '120.0 0'})() if p == '/proc/uptime' else Path(p)
+assert a.startup(settings) is False and take() == [], 'waits for the clock to sync'
+alerts.clock_synced = lambda: True
 alerts.Path = lambda p: type('P', (), {'read_text': lambda self: '120.0 0'})() if p == '/proc/uptime' else Path(p)
 a.startup(settings)
 m = take()
 assert len(m) == 1 and 'power cut?' in m[0][1], m
+a.prev_seen = (NOW[0] - timedelta(seconds=30)).timestamp()   # service restarted after boot -> silent
+assert a.startup(settings) is True and take() == []
 alerts.Path = Path
 
 # history: 10 days, ~5 cars/day at 17:00

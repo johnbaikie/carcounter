@@ -112,6 +112,14 @@ def service_state(unit):
         return 'unknown'
 
 
+def clock_synced():
+    try:
+        return subprocess.run(['timedatectl', 'show', '-p', 'NTPSynchronized', '--value'], capture_output=True,
+                              text=True, timeout=5).stdout.strip() == 'yes'
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def num(v):
     try:
         return float(v)
@@ -133,6 +141,7 @@ class Alerts:
         for k, v in (('active', {}), ('sent', {}), ('outbox', [])):
             self.state.setdefault(k, v)
         self.saved = (0.0, None)
+        self.prev_seen = self.state.get('last_seen')   # before check() overwrites it
         self.hist = (None, {}, {})   # (for day, {day: cars}, {day: hourly list}) - previous days, cached daily
 
     # ---------------------------------------------------------- plumbing
@@ -206,19 +215,27 @@ class Alerts:
 
     # ---------------------------------------------------------- startup
     def startup(self, cfg):
-        """Pi just booted and we were running before -> report the gap (likely a power cut)."""
+        """Pi just booted and we were running before -> report the gap (likely a power cut).
+        Waits for the clock to sync first: right after power-on the Pi's clock still shows the
+        time it was switched off, so the gap would look like a couple of minutes.
+        Returns True when done, False to be called again."""
         try:
             uptime = float(Path('/proc/uptime').read_text().split()[0])
         except (OSError, ValueError, IndexError):
-            return
-        last = self.state.get('last_seen')
-        if uptime > 600 or not last or not cfg['ALERT_POWER']:
-            return
+            return True
+        last = self.prev_seen
+        if uptime > 900 or not last or not cfg['ALERT_POWER']:
+            return True
+        if not clock_synced():
+            return False                                    # try again next check (gives up after 15 min uptime)
         boot = datetime.now() - timedelta(seconds=uptime)
         seen = datetime.fromtimestamp(last)
-        mins = max(0, (boot - seen).total_seconds() / 60)
+        if seen >= boot - timedelta(seconds=60):
+            return True                                     # we already ran this boot (service restarted)
+        mins = (boot - seen).total_seconds() / 60
         self.notify(POWER, f'The Pi restarted at {boot:%H:%M}. Last seen running around {seen:%a %H:%M} '
                            f'(down about {mins:.0f} min){" - power cut?" if mins >= 5 else ""}.')
+        return True
 
     # ---------------------------------------------------------- every 30 s
     def check(self):
@@ -371,11 +388,13 @@ def main():
     if not cd.pushover_keys():
         log.warning('Pushover keys not set - add them on the web page (Alerts). Checks run, nothing is sent.')
     trim_log()
-    a.startup(cd.load_settings())
+    boot_pending = True
     a.save(force=True)
     while True:
         t0 = time.monotonic()
         try:
+            if boot_pending:
+                boot_pending = not a.startup(cd.load_settings())
             a.retry_outbox()
             a.check()
         except Exception:
