@@ -9,6 +9,8 @@
 """
 
 import html
+import ipaddress
+import socket
 import json
 import os
 import signal
@@ -962,8 +964,82 @@ def thumbnail(src):
     return dst
 
 
+# ---------------------------------------------------------------- request checks
+def tailscale_name():
+    """This Pi's MagicDNS name (e.g. carcounter.<tailnet>.ts.net), or None."""
+    try:
+        out = subprocess.run(['tailscale', 'status', '--json'], capture_output=True, text=True, timeout=5).stdout
+        return (json.loads(out).get('Self', {}).get('DNSName') or '').rstrip('.').lower() or None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def allowed_hosts():
+    host = socket.gethostname().lower()
+    names = {'localhost', host, f'{host}.local'}
+    ts = tailscale_name()
+    if ts:
+        names.add(ts)
+    return names
+
+
+ALLOWED_HOSTS = allowed_hosts()
+_ts_checked = [time.time()]
+
+
+def host_ok(hostport):
+    """Host header must name this Pi or be a plain IP address. Blocks DNS rebinding, where a
+    malicious site points its own domain name at the Pi so your browser treats it as same-site."""
+    if not hostport:
+        return False
+    h = hostport.strip().lower()
+    if h.startswith('['):                       # [ipv6]:port
+        h = h[1:h.find(']')] if ']' in h else h
+    elif h.count(':') == 1:
+        h = h.rsplit(':', 1)[0]
+    h = h.rstrip('.')
+    if h in ALLOWED_HOSTS:
+        return True
+    if h.endswith('.ts.net') and time.time() - _ts_checked[0] > 60:   # Tailscale wasn't up at start?
+        _ts_checked[0] = time.time()
+        ts = tailscale_name()
+        if ts:
+            ALLOWED_HOSTS.add(ts)
+        return h == ts
+    try:
+        ipaddress.ip_address(h)
+        return True
+    except ValueError:
+        return False
+
+
+def same_origin(headers):
+    """A form POST must come from one of this site's own pages (blocks cross-site request forgery).
+    Browsers always send Origin on POSTs; tools like curl send nothing and are allowed."""
+    if headers.get('Sec-Fetch-Site') in ('cross-site', 'same-site'):
+        return False
+    src = headers.get('Origin') or headers.get('Referer')
+    if not src or src == 'null':
+        return not src                          # 'null' = sandboxed/opaque origin -> reject
+    netloc = src.split('://', 1)[-1].split('/', 1)[0]
+    return netloc.lower() == (headers.get('Host') or '').lower()
+
+
 class Handler(BaseHTTPRequestHandler):
+    def refused(self, post=False):
+        """True (and a 403 sent) if this request fails the host / origin checks."""
+        if not host_ok(self.headers.get('Host')):
+            why = 'Unknown host name'
+        elif post and not same_origin(self.headers):
+            why = 'Form submitted from another site'
+        else:
+            return False
+        self.send_error(403, why)
+        return True
+
     def do_GET(self):
+        if self.refused():
+            return
         path = unquote(self.path.split('?')[0])
         try:
             if path == '/':
@@ -1021,6 +1097,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_POST(self):
+        if self.refused(post=True):
+            return
         try:
             n = min(int(self.headers.get('Content-Length') or 0), 100_000)
             form = parse_qs(self.rfile.read(n).decode(errors='replace'), keep_blank_values=True)
