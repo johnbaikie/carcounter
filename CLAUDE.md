@@ -33,7 +33,9 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - ups_monitor.py: PLD + fuel gauge; shuts down only when on battery AND (low for N reads OR max time on battery);
   sets RTC wakealarm first. UPS_* settings re-read from config.json when it changes (runs as root, no signal needed).
   Writes /run/carcount-ups.json (state, pending shutdown, grace). `--once`, `--dry-run`
-- maintenance.py (hourly timer): SD fallback -> USB merge, photo retention (365 d / min free GB), summary_daily.csv
+- maintenance.py (hourly timer): SD fallback -> USB merge, photo retention (365 d / min free GB), summary_daily.csv, SQLite update
+- carcount_db.py: derived SQLite copy at ~/.local/share/carcount/carcount.db (ext4, WAL), incremental by file size/mtime,
+  auto-rebuild on schema change or corruption. CSVs stay the source of truth. Web does not use it yet.
 - web.py: LAN page on port 8080 (no auth): today, status, hourly/14-day line charts, photos, /day/<date>, /days,
   /settings (live beam reading, edit settings -> signals counter, recalibrate button),
   /power (UPS status - direct GPIO/I2C read if monitor not running, input voltage, battery chart, power events from journal, UPS_* settings)
@@ -50,7 +52,7 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - CSV per event in date folders on USB with SD fallback; maintenance merges SD days back to USB (tests/test_fallback.py)
 - systemd: counter, web, maintenance timer ENABLED. carcount-ups installed, NOT enabled (batteries)
 - Still to verify on hardware: RTC wake after shutdown (Pi 5 + POWER_OFF_ON_HALT=1); real mains-loss test once batteries are in
-- Tests: python3 tests/test_detector.py; python3 tests/test_fallback.py
+- Tests: python3 tests/test_detector.py; tests/test_fallback.py; tests/test_db.py
 
 ## v2 / later
 - DONE: retention, daily/hourly summaries, health logging, watchdog, web page

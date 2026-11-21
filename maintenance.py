@@ -5,6 +5,7 @@
 2. Disk retention: delete the photos of the oldest days (CSV logs are always kept)
    when photos are older than PHOTO_KEEP_DAYS or free space drops below MIN_FREE_GB.
 3. Rebuild <storage root>/summary_daily.csv: date, total, h00..h23.
+4. Update the SQLite copy of the CSVs (carcount_db.py) for fast queries.
 
   --dry-run   report what would be done without changing anything
 """
@@ -15,7 +16,10 @@ import logging
 import shutil
 from datetime import date, timedelta
 
+import sqlite3
+
 import carcount_data as cd
+import carcount_db
 
 _cfg = cd.load_settings()                       # editable on the web Settings page
 PHOTO_KEEP_DAYS = _cfg['PHOTO_KEEP_DAYS'] or None  # 0 -> keep until disk space runs low
@@ -100,6 +104,17 @@ def summaries(dry):
     tmp.replace(out)
 
 
+def update_db(dry):
+    if dry:
+        log.info('Would update database %s', carcount_db.DB_PATH)
+        return
+    try:
+        carcount_db.update()
+    except sqlite3.DatabaseError as e:
+        log.error('Database error (%s) - rebuilding from CSVs', e)
+        carcount_db.update(rebuild=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dry-run', action='store_true')
@@ -108,7 +123,8 @@ def main():
     for step in (lambda: merge_sd_to_usb(args.dry_run),
                  lambda: retention(cd.USB_ROOT, args.dry_run),
                  lambda: retention(cd.SD_ROOT, args.dry_run),
-                 lambda: summaries(args.dry_run)):
+                 lambda: summaries(args.dry_run),
+                 lambda: update_db(args.dry_run)):
         try:
             step()
         except Exception:

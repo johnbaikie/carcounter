@@ -21,8 +21,10 @@ distance or lost signal) and is counted once, however long it blocks the beam.
 | `carcounter.py` | Counter: 100 Hz lidar reads, auto-calibrated baseline, event detection, photos, CSV + health log |
 | `carcount_data.py` | Shared paths, CSV readers, and the tunable settings (defaults + limits) |
 | `web.py` | Web page on port 8080: today, status, charts, photos, per-day pages, Settings |
-| `maintenance.py` | Hourly: move SD fallback data to USB, photo retention, `summary_daily.csv` |
+| `maintenance.py` | Hourly: move SD fallback data to USB, photo retention, `summary_daily.csv`, SQLite update |
+| `carcount_db.py` | SQLite copy of the CSVs for fast queries (derived; safe to delete and rebuild) |
 | `ups_monitor.py` | X1202 UPS: logs power events, safe shutdown on low battery, RTC wake to restart |
+| `tests/` | `python3 tests/test_detector.py`, `test_fallback.py`, `test_db.py` |
 | `systemd/` | Service and timer units |
 | `luna_camera.py` | Original prototype (superseded) |
 
@@ -35,6 +37,15 @@ distance or lost signal) and is counted once, however long it blocks the beam.
                                   disk, camera, UPS
   YYYY-MM-DD/photos/*.jpg         YYYYMMDD_HHMMSS_mmm.jpg
   summary_daily.csv               date, total, h00..h23
+```
+
+## SQLite copy
+The CSVs are the record. Every hour `maintenance.py` also updates `~/.local/share/carcount/carcount.db`
+(only changed CSVs are re-imported). Tables `events` and `health`; views `daily` and `hourly`.
+```bash
+sudo apt install sqlite3        # optional command-line client
+sqlite3 ~/.local/share/carcount/carcount.db "SELECT hour, round(avg(cars),1) FROM hourly GROUP BY hour"
+python3 carcount_db.py --rebuild   # rebuild from all CSVs
 ```
 
 ## Install
