@@ -39,7 +39,8 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - web.py: LAN page on port 8080 (no auth): today, status, hourly/14-day line charts, photos, /day/<date>, /days,
   /settings (live beam reading, edit settings -> signals counter, recalibrate button),
   /power (UPS status - direct GPIO/I2C read if monitor not running, input voltage, battery chart, power events from journal, UPS_* settings)
-- Deploy code changes without sudo: kill $(systemctl show -p MainPID --value carcount[-web]) (Restart=always)
+- Deploy code changes: Settings page > System card Restart buttons (import-check first), or
+  kill $(systemctl show -p MainPID --value carcount[-web]) (Restart=always)
 - systemd/: carcount.service (Type=notify, WatchdogSec=60), carcount-web.service, carcount-maintenance.{service,timer},
   carcount-ups.service (NOT enabled until batteries tested). Logs: journalctl -u carcount -f
 - Hardware watchdog already active by default (systemd RuntimeWatchdogUSec=1min)

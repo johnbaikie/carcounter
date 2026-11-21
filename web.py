@@ -13,6 +13,8 @@ import json
 import os
 import signal
 import subprocess
+import sys
+import time
 import mimetypes
 import re
 import threading
@@ -22,6 +24,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
 import carcount_data as cd
+
+SRC = Path(__file__).resolve().parent
+STARTED = time.time()
+SERVICES = {   # restart button: service -> files whose changes need that restart
+    'web': ('carcount-web', 'Web page', ['web.py', 'carcount_data.py', 'ups_monitor.py']),
+    'counter': ('carcount', 'Counter', ['carcounter.py', 'carcount_data.py']),
+}
 
 PORT = 8080
 THUMB_SIZE = (480, 270)
@@ -193,7 +202,7 @@ def page(title, body, refresh=None, active=None):
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">{meta}<title>{esc(title)}</title>
 <style>{CSS}</style></head><body><main>
-<header><h1>Car counter</h1><nav>{nav}</nav></header>
+<header><h1>Car Counter</h1><nav>{nav}</nav></header>
 {body}</main></body></html>"""
 
 
@@ -273,7 +282,7 @@ def dashboard():
 <div class="row"><div class="card"><h2>Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
 <div class="card"><h2>Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
 <div class="card"><h2>Latest photos</h2>{photos_grid(recent, 12)}</div>"""
-    return page('Car counter', body, refresh=60, active='/')
+    return page('Car Counter', body, refresh=60, active='/')
 
 
 def day_page(d):
@@ -385,6 +394,7 @@ def settings_page(values=None, errors=None, msg=None):
 <span class="muted" style="align-self:center">Keep the beam clear for the calibration time.</span></form></div>
 {settings_form('/settings', COUNTER_KEYS, values, errors, 'counter settings')}
 <p class="muted">UPS / battery settings are on the <a href="/power">Power</a> page.</p>
+{system_card()}
 <script>
 async function poll() {{
   try {{
@@ -405,6 +415,70 @@ async function poll() {{
 poll(); setInterval(poll, 500);
 </script>"""
     return page('Settings', body, active='/settings')
+
+
+def service_started(unit):
+    """Start time (epoch) of a service's main process, or None."""
+    try:
+        pid = subprocess.run(['systemctl', 'show', '-p', 'MainPID', '--value', unit],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        if not pid or pid == '0':
+            return None
+        if pid == str(os.getpid()):
+            return STARTED
+        et = subprocess.run(['ps', '-o', 'etimes=', '-p', pid], capture_output=True, text=True, timeout=5).stdout
+        return time.time() - int(et.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def check_code(files):
+    """Import the changed modules in a separate Python, so errors are caught before restarting."""
+    mods = ', '.join(Path(f).stem for f in files)
+    try:
+        r = subprocess.run([sys.executable, '-c', f'import {mods}'], cwd=SRC, capture_output=True,
+                           text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return 'checking the code timed out'
+    if r.returncode:
+        return (r.stderr.strip().splitlines() or ['unknown error'])[-1] + \
+            ('\n' + '\n'.join(r.stderr.strip().splitlines()[-4:-1]) if r.stderr.count('\n') > 1 else '')
+    return None
+
+
+def system_card():
+    rows = []
+    for key, (unit, label, files) in SERVICES.items():
+        started = service_started(unit)
+        if started is None:
+            state = status_badge('bad', 'not running')
+        else:
+            changed = [f for f in files if (SRC / f).stat().st_mtime > started]
+            state = (status_badge('warn', 'changed since start: ' + ', '.join(changed)) if changed
+                     else status_badge('good', f'running since {datetime.fromtimestamp(started):%d %b %H:%M}'))
+        rows.append(f'<div class="field"><label>{label}</label>'
+                    f'<form method="post" action="/restart/{key}"><button type="submit">Restart</button></form>'
+                    f'<div class="help">{state}</div></div>')
+    return ('<div class="card"><h2>System</h2>' + ''.join(rows) +
+            '<p class="muted">Restart after editing the code. The code is checked first; if it has an error, '
+            'nothing is restarted and the error is shown here. Restarting the counter pauses counting for '
+            'about 10 s while it recalibrates.</p></div>')
+
+
+def restart_page(label):
+    body = f"""<div class="card"><h2>Restarting</h2><p>{status_badge('warn', f'{label} is restarting…')}</p>
+<p class="muted" id="wait">This page returns to Settings when it is back (about 5–10 s).</p></div>
+<script>
+const t0 = Date.now();
+setTimeout(async function poll() {{
+  try {{ const r = await fetch('/settings', {{cache: 'no-store'}});
+         if (r.ok) {{ location.href = '/settings?msg=' + encodeURIComponent('{label} restarted.'); return; }} }} catch (e) {{}}
+  if (Date.now() - t0 > 60000) {{ document.getElementById('wait').textContent =
+      'Still not back after a minute - check: journalctl -u carcount-web -n 30'; return; }}
+  setTimeout(poll, 1000);
+}}, 2500);
+</script>"""
+    return page('Restarting', body, active='/settings')
 
 
 def save_from_form(form, keys):
@@ -681,6 +755,19 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == base + '/reset':
                     changed = reset_settings(keys)
                     return self.redirect(f'{base}?msg=' + quote('Reset to defaults. ' + apply_message(changed)))
+            m = re.fullmatch(r'/restart/(web|counter)', self.path)
+            if m:
+                unit, label, files = SERVICES[m[1]]
+                err = check_code(files)
+                if err:
+                    return self.redirect('/settings?msg=' + quote(f'{label} NOT restarted - the code has an error: {err}'))
+                if m[1] == 'web':
+                    self.send_html(restart_page(label))
+                    self.wfile.flush()
+                    threading.Timer(0.5, os.kill, (os.getpid(), signal.SIGTERM)).start()
+                    return None
+                err = signal_counter(signal.SIGTERM)
+                return self.redirect('/settings?msg=' + quote(err or 'Counter restarting - counting resumes in about 10 s.'))
             if self.path == '/recalibrate':
                 err = signal_counter(signal.SIGUSR1)
                 return self.redirect('/settings?msg=' + quote(err or 'Recalibrating - keep the beam clear.'))
