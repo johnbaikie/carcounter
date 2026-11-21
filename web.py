@@ -215,7 +215,7 @@ def status_badge(kind, text):
     return f'<span class="pill"><span class="dot" style="background:{color}"></span>{icon} {esc(text)}</span>'
 
 
-NAV = [('/', 'Today'), ('/days', 'All days'), ('/settings', 'Settings'), ('/power', 'Power'),
+NAV = [('/', 'Today'), ('/days', 'All Days'), ('/settings', 'Settings'), ('/power', 'Power'),
        ('/summary.csv', 'Download Summary')]
 
 
