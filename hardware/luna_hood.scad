@@ -1,6 +1,7 @@
 // TF-Luna rain hood: a sleeve the sensor slides into, with a visor past the lenses,
 // a drip groove, an open floor in front of the sensor (drains), a back plate with a
-// cable window, and a screw flange for a post or board.
+// cable window (+ half-circle wire notch), two M2 holes that bolt the sensor's ears
+// to the back plate, a screw flange below and a single-screw tab on top.
 //
 // Modelled in PRINT orientation: back plate flat on the bed, beam pointing up (+Z).
 // Installed, +Y is up and the beam is horizontal. No supports needed.
@@ -13,7 +14,14 @@ luna_w = 35.0;      // across the front face (the two lenses sit side by side al
 luna_h = 21.25;     // height of the front face
 luna_d = 13.5;      // front-to-back depth (excluding the cable plug)
 clear  = 0.35;      // gap per side for a snug slide fit
-rib    = 0.35;      // crush ribs on the side walls hold the sensor (0 = none)
+rib    = 0;         // crush ribs on the side walls (0 = none; the M2 screws hold it now)
+// The sensor's two mounting ears are on its back face (datasheet: 2x d2.2, 30.5 apart,
+// 9 mm below the top edge). M2 screws go in from the back, heads countersunk flush
+// with the back plate, nuts on the front of the ears.
+ear_pitch = 30.5;   // hole centre to centre
+ear_from_top = 9;   // hole centre below the sensor's top edge
+m2_d      = 2.4;    // clearance hole for M2
+m2_head   = 4.2;    // countersink diameter on the back face (0 = plain holes)
 
 /* [Hood] */
 wall     = 2.0;     // wall thickness (2 mm = 4-5 perimeters at 0.4 nozzle)
@@ -27,9 +35,12 @@ groove   = 1.5;     // drip groove under the visor's front edge (0 = none)
 win_w      = 26;    // cable window in the back plate (leaves a ledge the sensor rests on)
 win_h      = 13;
 win_y      = 0;     // move the window up (+) / down (-) to suit your plug position
+notch_r    = 5;     // half-circle wire notch below the window, toward the flange (0 = none)
 flange_len = 22;    // mounting flange below the hood
 screw_d    = 4.5;   // screw holes (#8 / M4 wood or machine screws)
 csink_d    = 9;     // countersink diameter (0 = plain holes)
+tab_w      = 14;    // top tab (flush with the back plate) for one screw into the box
+tab_len    = 12;    // how far it sticks up above the hood
 
 $fn = 48;
 
@@ -43,6 +54,10 @@ z_end = z_front + hood_len;              // visor tip
 drop = tan(slope);
 function top_in(z) = ih / 2 + top_gap - (z - z_front) * drop;   // visor underside at height z
 end_gap = top_in(z_end) - ih / 2;
+y_top = top_in(0) + wall;                // outer top at the back
+ear_y = luna_h / 2 - ear_from_top;       // screw holes, sensor centred in the pocket
+win_bot = win_y - win_h / 2;
+assert(win_bot - notch_r >= y_bot + 1, "Wire notch breaks through the bottom wall - reduce notch_r");
 assert(end_gap >= 1, str("Visor tip is only ", end_gap,
        " mm above the sensor top - reduce slope or hood_len, or raise top_gap (keep it out of the beam)"));
 
@@ -59,6 +74,19 @@ module body() {
     slab(y_bot, top_in(0) + wall, top_in(z_end) + wall, -ow / 2, ow / 2, 0, z_end);
     // mounting flange on the bed, below the hood
     translate([-ow / 2, y_bot - flange_len, 0]) cube([ow, flange_len + wall, back]);
+    // single-screw tab above the hood, rounded end
+    hull() {
+        translate([-tab_w / 2, y_top - wall, 0]) cube([tab_w, wall, back]);
+        translate([0, y_top + tab_len - tab_w / 2, 0]) cylinder(d = tab_w, h = back);
+    }
+}
+
+module screw(d, cs) {
+    // through hole + countersink on the front side (screw goes in from the hood side)
+    cylinder(d = d, h = back + 2);
+    if (cs > 0)
+        translate([0, 0, back + 1 - (cs - d) / 2])
+            cylinder(d1 = d, d2 = cs, h = (cs - d) / 2 + 0.01);
 }
 
 module cuts() {
@@ -67,18 +95,27 @@ module cuts() {
     // floor removed in front of the sensor so water drains out
     translate([-iw / 2, y_bot - 1, z_front]) cube([iw, ih / 2 + 1 + wall, hood_len + 1]);
     // cable window
-    translate([-win_w / 2, win_y - win_h / 2, -1]) cube([win_w, win_h, back + 2]);
+    translate([-win_w / 2, win_bot, -1]) cube([win_w, win_h, back + 2]);
+    // half-circle wire notch on the flange side of the window
+    if (notch_r > 0)
+        translate([0, win_bot + 0.01, -1]) intersection() {
+            cylinder(r = notch_r, h = back + 2);
+            translate([-notch_r, -notch_r, 0]) cube([2 * notch_r, notch_r, back + 2]);
+        }
+    // M2 holes for the sensor's ears, countersunk on the BACK face (flush against the box)
+    for (sx = [-1, 1]) translate([sx * ear_pitch / 2, ear_y, -1]) {
+        cylinder(d = m2_d, h = back + 2);
+        if (m2_head > 0)
+            translate([0, 0, 1 - 0.01]) cylinder(d1 = m2_head, d2 = m2_d, h = (m2_head - m2_d) / 2 + 0.01);
+    }
     // drip groove across the underside of the visor near its tip
     if (groove > 0)
         translate([-iw / 2 - 0.01, top_in(z_end - 4) - groove * 0.6, z_end - 4 - groove])
             cube([iw + 0.02, groove * 0.6 + 0.8, groove]);   // 0.8 mm deep into the visor
     // screw holes (+ countersink on the front side, screw goes in from the hood side)
-    for (sx = [-1, 1]) translate([sx * ow / 4, y_bot - flange_len / 2, -1]) {
-        cylinder(d = screw_d, h = back + 2);
-        if (csink_d > 0)
-            translate([0, 0, back + 1 - (csink_d - screw_d) / 2])
-                cylinder(d1 = screw_d, d2 = csink_d, h = (csink_d - screw_d) / 2 + 0.01);
-    }
+    for (sx = [-1, 1]) translate([sx * ow / 4, y_bot - flange_len / 2, -1]) screw(screw_d, csink_d);
+    // top tab screw
+    translate([0, y_top + tab_len - tab_w / 2, -1]) screw(screw_d, csink_d);
 }
 
 module ribs() {
@@ -92,5 +129,5 @@ module ribs() {
 difference() { body(); cuts(); }
 ribs();
 
-echo(str("Outer size: ", ow, " x ", top_in(0) + wall - y_bot + flange_len, " x ", z_end, " mm (W x H x D)"));
+echo(str("Outer size: ", ow, " x ", y_top + tab_len - y_bot + flange_len, " x ", z_end, " mm (W x H x D)"));
 echo(str("Visor tip clears the sensor top by ", end_gap, " mm"));
