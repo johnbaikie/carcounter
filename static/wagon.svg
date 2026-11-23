@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 124 66" role="img" aria-label="Station wagon with a Christmas tree on the roof">
+<rect x="10" y="15" width="10" height="5" rx="1.5" fill="#7a4a21"/>
+<path d="M18 10 L34 5 L32 11 L50 4 L48 11 L66 4 L64 11 L82 6 L80 12 L98 13 L80 15 L82 20 L64 21 L66 25 L48 23 L50 27 L32 23 L34 26 L18 22 Z" fill="#1f7a3f"/>
+<path d="M22 14 L96 13 L80 16 L60 17 L40 18 L22 18 Z" fill="#2e9a52" opacity=".7"/>
+<circle cx="40" cy="12" r="1.8" fill="#e8303f"/><circle cx="58" cy="19" r="1.8" fill="#ffc93c"/>
+<circle cx="72" cy="11" r="1.6" fill="#4ea8ff"/><circle cx="30" cy="19" r="1.6" fill="#ffc93c"/>
+<circle cx="84" cy="15" r="1.5" fill="#e8303f"/>
+<path d="M36 26 L38 5 M70 26 L72 4" stroke="#c9b48a" stroke-width="1.6"/>
+<rect x="20" y="24" width="64" height="2.4" rx="1" fill="#3a3a3a"/>
+<path d="M6 50 L6 36 Q6 31 11 31 L16 26 L86 26 L99 34 L113 36 Q118 37 118 42 L118 50 Z" fill="#e7d9b8" stroke="#6b5a3a" stroke-width="1.2"/>
+<path d="M19 29 L40 29 L40 34 L16 34 Z M43 29 L62 29 L62 34 L43 34 Z M65 29 L84 29 L94 34 L65 34 Z" fill="#9fd0f0" stroke="#6b5a3a" stroke-width=".8"/>
+<rect x="10" y="38" width="96" height="8" rx="1.5" fill="#9a5f2e" stroke="#e7d9b8" stroke-width="1"/>
+<path d="M30 38 V46 M56 38 V46 M80 38 V46" stroke="#e7d9b8" stroke-width="1"/>
+<path d="M12 41 H104 M12 43.5 H104" stroke="#7a4a21" stroke-width=".5" opacity=".6"/>
+<rect x="113" y="38.5" width="5" height="3.5" rx="1" fill="#ffe27a"/>
+<rect x="6" y="38" width="3" height="5" rx="1" fill="#e8303f"/>
+<rect x="3" y="48" width="12" height="3" rx="1.5" fill="#9aa0a6"/><rect x="108" y="48" width="13" height="3" rx="1.5" fill="#9aa0a6"/>
+<circle cx="30" cy="51" r="8" fill="#222"/><circle cx="30" cy="51" r="3.5" fill="#b8bec4"/>
+<circle cx="96" cy="51" r="8" fill="#222"/><circle cx="96" cy="51" r="3.5" fill="#b8bec4"/>
+</svg>

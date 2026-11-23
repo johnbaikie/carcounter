@@ -136,6 +136,9 @@ def today():
 CONFIG_PATH = Path('/home/carcount/.config/carcount/config.json')
 LIVE_STATE = Path('/dev/shm/carcount-live.json')   # written by carcounter ~2x/s for the web page
 PHOTO_SIZES = ['1536x864', '2304x1296', '4608x2592']
+THEMES = ['Auto', 'Christmas', 'Plain']
+CHOICES = {'PHOTO_SIZE': PHOTO_SIZES, 'WEB_THEME': THEMES}
+XMAS_SEASON = ((11, 15), (1, 6))      # Auto theme: Christmas from 15 Nov to 6 Jan
 
 SETTINGS = [
     # key, group, label, type, default, min, max, apply, help
@@ -176,6 +179,8 @@ SETTINGS = [
      '0 = keep until the disk is nearly full. CSV logs are always kept.'),
     ('MIN_FREE_GB_USB', 'Storage', 'Minimum free space on USB (GB)', 'float', 5.0, 1, 100, 'next run',
      'Oldest photos are deleted to keep at least this much free.'),
+    ('WEB_THEME', 'Web page', 'Theme', 'choice', 'Auto', None, None, 'web',
+     'Auto = Christmas from 15 Nov to 6 Jan, plain the rest of the year.'),
     # Power: read by ups_monitor.py (runs as root), which re-reads the config file within a few seconds.
     ('UPS_SHUTDOWN_ENABLED', 'Power', 'Shut down on low battery', 'bool', True, None, None, 'ups',
      'Off = only log what would happen (use while testing new batteries).'),
@@ -221,7 +226,7 @@ def parse_setting(key, raw):
     if t == 'bool':
         return (raw if isinstance(raw, bool) else str(raw).lower() in ('1', 'true', 'on', 'yes')), None
     if t == 'choice':
-        return (raw, None) if raw in PHOTO_SIZES else (s['default'], f'{s["label"]}: invalid choice')
+        return (raw, None) if raw in CHOICES[key] else (s['default'], f'{s["label"]}: invalid choice')
     if t == 'time':
         m = re.fullmatch(r'\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*', str(raw))
         if m and int(m[1]) < 24 and int(m[2]) < 60:
@@ -237,6 +242,15 @@ def parse_setting(key, raw):
     if not s['min'] <= v <= s['max']:
         return s['default'], f'{s["label"]}: must be between {s["min"]} and {s["max"]}'
     return v, None
+
+
+def festive(theme, when=None):
+    """Is the Christmas theme on? theme = the WEB_THEME setting."""
+    if theme != 'Auto':
+        return theme == 'Christmas'
+    md = ((when or date.today()).month, (when or date.today()).day)
+    (m0, d0), (m1, d1) = XMAS_SEASON
+    return md >= (m0, d0) or md <= (m1, d1)
 
 
 def load_settings():

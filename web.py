@@ -65,6 +65,9 @@ nav a.active{background:var(--bar);border-color:var(--bar);color:#fff}
 .hero{display:flex;gap:32px;flex-wrap:wrap;align-items:flex-end}
 .hero .big{font-size:56px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
 .hero .sub{color:var(--ink2)}
+.hero .mid{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums}
+.summary .hero{align-items:flex-end}
+.summary .status{margin-left:auto;align-self:center;text-align:right}
 .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 16px}
 .stats div{font-variant-numeric:tabular-nums}
 .stats span{display:block;color:var(--muted);font-size:12px}
@@ -122,6 +125,9 @@ main{padding:12px}
 .card{padding:14px}
 .hero{gap:20px}
 .hero .big{font-size:48px}
+.summary .status{margin-left:0;text-align:left;flex-basis:100%}
+.photos{grid-template-columns:repeat(2,1fr);gap:8px}
+.photos figcaption{font-size:12px}
 table.events tr.head{display:none}
 table.events tr{display:grid;grid-template-columns:128px 1fr 1fr;gap:2px 10px;padding:10px 0;
 border-bottom:1px solid var(--grid)}
@@ -131,6 +137,84 @@ table.events td.ph img{width:128px}
 table.events td[data-label]::before{content:attr(data-label);display:block;color:var(--muted);font-size:11px}
 }
 """
+
+# Christmas theme (WEB_THEME setting; Auto = 15 Nov to 6 Jan). Scoped to body.xmas.
+XMAS_CSS = """
+body.xmas{--page:#fbf6ee;--surface:#fffdf9;--ink:#1d1a17;--ink2:#5a4f45;--muted:#8a7e72;--grid:#ece3d6;
+--axis:#d4c6b3;--bar:#c8102e;--bar-hi:#8e0b20;--border:rgba(140,20,30,.14);--good:#1f8a4c;--warn:#e0a100;--link:#13703f}
+@media (prefers-color-scheme:dark){body.xmas{--page:#0a1c14;--surface:#11281e;--ink:#f4efe6;--ink2:#cfc5b4;
+--muted:#93a597;--grid:#1d3a2c;--axis:#2d5240;--bar:#ef4b5f;--bar-hi:#ff8f9c;--border:rgba(255,215,140,.14);
+--good:#3ccf7c;--link:#8fdcae}}
+body.xmas::before{content:"";display:block;height:6px;
+background:repeating-linear-gradient(-45deg,#c8102e 0 10px,#fff 10px 20px)}
+.xmas header h1 .tag{display:block;font-size:13px;font-weight:500;color:var(--muted)}
+.xmas .card{box-shadow:0 1px 0 rgba(200,16,46,.08)}
+.xmas .summary{position:relative;border-color:rgba(200,16,46,.3);
+background:linear-gradient(135deg,rgba(200,16,46,.05),transparent 40%,rgba(19,112,63,.06))}
+.xmas .summary h2::after{content:" 🎄"}
+.xmas .hero .big{color:var(--bar)}
+.lights{position:relative;display:flex;justify-content:space-between;height:24px;margin:-4px 0 12px;overflow:hidden}
+.lights::before{content:"";position:absolute;left:0;right:0;top:3px;height:8px;border-top:2px solid #2f6b48;
+border-radius:50%}
+.lights i{flex:none;width:9px;height:14px;margin-top:8px;border-radius:50%/60% 60% 40% 40%;background:currentColor;
+box-shadow:0 0 8px currentColor;animation:twinkle 2.4s ease-in-out infinite;color:#ff3b3b}
+.lights i:nth-child(4n+2){color:#ffc93c;animation-delay:.6s}
+.lights i:nth-child(4n+3){color:#33d17a;animation-delay:1.2s}
+.lights i:nth-child(4n){color:#4ea8ff;animation-delay:1.8s}
+@keyframes twinkle{0%,100%{opacity:1}50%{opacity:.3}}
+@media (max-width:600px){.lights i:nth-child(n+19){display:none}}
+.snow{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:5}
+.snow span{position:absolute;top:-2em;color:#a9c9e8;opacity:.75;animation:fall linear infinite}
+@media (prefers-color-scheme:dark){.snow span{color:#fff;opacity:.6}}
+@keyframes fall{to{transform:translateY(110vh) translateX(3vw) rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.snow{display:none}.lights i{animation:none}}
+header h1{display:flex;align-items:center;gap:10px}
+header h1 .wagon{width:64px;flex:none}
+.wagon svg,.lane .drive svg{display:block;width:100%;height:auto}
+.scene{margin:-4px 0 16px}
+.scene .lights{margin:0}
+.lane{position:relative;height:58px;overflow:hidden}
+.lane::before{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;border-radius:6px;
+background:#3a3c40;border-top:3px solid #f4f1ea;box-shadow:inset 0 -2px 0 #2a2b2e}
+.lane::after{content:"";position:absolute;left:8px;right:8px;bottom:11px;height:3px;
+background:repeating-linear-gradient(90deg,#f2c94c 0 18px,transparent 18px 34px)}
+.lane .drive{position:absolute;bottom:3px;left:-100px;width:90px;z-index:2;visibility:hidden}
+.lane .drive.go{visibility:visible;animation:drive 6s linear forwards}
+.lane .drive.go svg{display:block;animation:bounce .3s ease-in-out infinite alternate}
+@keyframes drive{from{left:-100px}to{left:calc(100% + 10px)}}
+@keyframes bounce{to{transform:translateY(-1.5px)}}
+@media (prefers-reduced-motion:reduce){.lane .drive.go{animation:none;left:calc(50% - 45px)}.lane .drive.go svg{animation:none}}
+.cheer{display:inline-block;margin-top:6px;font-weight:600;color:var(--link)}
+"""
+WAGON_SVG = (Path(__file__).resolve().parent / 'static' / 'wagon.svg').read_text().strip()
+WAGON_ICON = 'data:image/svg+xml,' + quote(WAGON_SVG)
+NAV_EMOJI = {'/': '🎄', '/days': '📅', '/settings': '⚙️', '/power': '🔋', '/alerts': '🔔', '/summary.csv': '📜'}
+# (left %, fall seconds, start delay s, size px, flake)
+SNOW = [(4, 14, 0, 14, '❄'), (11, 19, 6, 10, '❅'), (19, 16, 11, 16, '❆'), (27, 22, 3, 11, '❄'),
+        (35, 17, 9, 13, '❅'), (44, 20, 1, 18, '❄'), (52, 15, 13, 10, '❆'), (60, 23, 5, 14, '❅'),
+        (68, 18, 8, 12, '❄'), (76, 21, 2, 16, '❆'), (84, 16, 12, 11, '❅'), (92, 19, 7, 15, '❄')]
+LIGHTS = '<div class="lights" aria-hidden="true">' + '<i></i>' * 32 + '</div>'
+# Today page: lights + a road the wagon drives along once for every new car
+SNOWFALL = '<div class="snow" aria-hidden="true">' + ''.join(
+    f'<span style="left:{x}%;animation-duration:{t}s;animation-delay:-{d}s;font-size:{z}px">{f}</span>'
+    for x, t, d, z, f in SNOW) + '</div>'
+
+
+def xmas():
+    return cd.festive(cd.load_settings()['WEB_THEME'])
+
+
+def xmas_countdown(today=None):
+    """(number, label) for the summary card, or None outside December."""
+    today = today or date.today()
+    if today.month != 12 or today.day > 26:
+        return None
+    if today.day == 25:
+        return '🎄', 'Merry Christmas!'
+    if today.day == 26:
+        return '🎁', 'Happy Boxing Day'
+    n = (date(today.year, 12, 25) - today).days
+    return n, f'sleep{"s" * (n != 1)} till Christmas 🎅'
 
 
 # ---------------------------------------------------------------- helpers
@@ -255,20 +339,42 @@ WATCH_JS = """<script>
 </script>"""
 
 
-def page(title, body, refresh=None, active=None, watch=None):
+DRIVE_JS = """<script>
+// The wagon drives across once on the first visit, then once for every car counted since the last view.
+(function () {
+  const n = %d; let prev = null;
+  try { prev = sessionStorage.getItem('cars'); sessionStorage.setItem('cars', n); } catch (e) {}
+  const k = prev === null ? 1 : Math.min(n - (+prev), 5);
+  const el = document.getElementById('drive');
+  if (el && k > 0) { el.style.animationIterationCount = k; el.classList.add('go'); }
+})();
+</script>"""
+
+
+def page(title, body, refresh=None, active=None, watch=None, snow=True, drive=None):
     if watch:
         body += WATCH_JS % (watch, json.dumps(events_version(watch)))
-    nav = ''.join(f'<a href="{u}"{' class="active" aria-current="page"' if u == active else ''}>{t}</a>' for u, t in NAV)
+    festive = xmas()
+    nav = ''.join(f'<a href="{u}"{' class="active" aria-current="page"' if u == active else ''}>'
+                  f'{NAV_EMOJI[u] + " " if festive else ""}{t}</a>' for u, t in NAV)
+    h1 = (f'<span class="wagon">{WAGON_SVG}</span><span>Car Counter'
+          '<span class="tag">🛷 Sleigh spotting on our street</span></span>') if festive else 'Car Counter'
+    css = CSS + XMAS_CSS if festive else CSS
+    extra = ((LIGHTS if drive is None else '') + (SNOWFALL if snow else '')) if festive else ''
+    if festive and drive is not None:
+        body += DRIVE_JS % drive
+    icon = f'<link rel="icon" href="{WAGON_ICON}">' if festive else ''
+    body_cls = ' class="xmas"' if festive else ''
     meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ''
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Car Counter">{meta}<title>{esc(title)}</title>
-<style>{CSS}</style></head><body><main>
-<header><h1>Car Counter</h1><nav>{nav}</nav></header>
-{body}</main></body></html>"""
+<meta name="apple-mobile-web-app-title" content="Car Counter">{icon}{meta}<title>{esc(title)}</title>
+<style>{css}</style></head><body{body_cls}><main>
+<header><h1>{h1}</h1><nav>{nav}</nav></header>
+{extra}{body}</main></body></html>"""
 
 
 # ---------------------------------------------------------------- pages
@@ -286,27 +392,39 @@ def throttle_flags(value):
     return now, past
 
 
-def health_card():
+def health_status():
+    """(kind, text, latest health row or None, age in s) - the one-line status."""
     rows = cd.health(cd.today())
     if not rows:
-        return f'<div class="card"><h2>Status</h2>{status_badge("bad", "No health data today - is carcount.service running?")}</div>'
+        return 'bad', 'No health data today - is carcount.service running?', None, None
     h = rows[-1]
     age = (datetime.now() - datetime.fromisoformat(h['timestamp'])).total_seconds()
     if age > STALE_S:
-        badge = status_badge('bad', f'Counter not reporting (last update {int(age // 60)} min ago)')
-    elif float(h.get('frames_per_s') or 0) < 50:
-        badge = status_badge('bad', 'Lidar not sending data')
-    elif h.get('camera') != 'ok':
-        badge = status_badge('warn', 'Counting, but camera unavailable')
-    elif h.get('fan_rpm') == '0' and float(h.get('cpu_temp_c') or 0) >= 65:
-        badge = status_badge('warn', f'Running - fan not spinning, CPU {h["cpu_temp_c"]} °C')
-    elif throttle_flags(h.get('throttled'))[0]:
-        badge = status_badge('warn', 'Running - ' + ', '.join(throttle_flags(h.get('throttled'))[0]) + ' now')
-    else:
-        badge = status_badge('good', 'Running')
+        return 'bad', f'Counter not reporting (last update {int(age // 60)} min ago)', h, age
+    if float(h.get('frames_per_s') or 0) < 50:
+        return 'bad', 'Lidar not sending data', h, age
+    if h.get('camera') != 'ok':
+        return 'warn', 'Counting, but camera unavailable', h, age
+    if float(h.get('cpu_temp_c') or 0) >= cd.load_settings()['ALERT_CPU_TEMP']:
+        return 'warn', f'Running - CPU hot, {h["cpu_temp_c"]} °C', h, age
+    now_f = throttle_flags(h.get('throttled'))[0]
+    if now_f:
+        return 'warn', 'Running - ' + ', '.join(now_f) + ' now', h, age
+    return 'good', 'Running', h, age
+
+
+def paused_pill(age):
     cfg = cd.load_settings()
-    if age <= STALE_S and not cd.in_window(cfg['COUNT_START'], cfg['COUNT_STOP']):
-        badge += f' <span class="pill">⏸ Counting paused · counting hours {cfg["COUNT_START"]}-{cfg["COUNT_STOP"]}</span>'
+    if age is not None and age <= STALE_S and not cd.in_window(cfg['COUNT_START'], cfg['COUNT_STOP']):
+        return f' <span class="pill">⏸ Counting paused · counting hours {cfg["COUNT_START"]}-{cfg["COUNT_STOP"]}</span>'
+    return ''
+
+
+def health_card():
+    kind, text, h, age = health_status()
+    if h is None:
+        return f'<div class="card" id="status"><h2>Status</h2>{status_badge(kind, text)}</div>'
+    badge = status_badge(kind, text) + paused_pill(age)
     now_f, past_f = throttle_flags(h.get('throttled'))
     if past_f and not now_f:
         badge += (f'<br><span class="muted" style="font-size:13px">Earlier since boot: {", ".join(past_f)} '
@@ -322,14 +440,14 @@ def health_card():
         stat('Lidar', f'{h["frames_per_s"]} fps · {h["valid_pct"]}% valid'),
         stat('Beam baseline', f'{h["baseline_cm"]} cm' if h['baseline_cm'] else 'no target'),
         stat('CPU temp', f'{h["cpu_temp_c"]} °C'),
-        stat('Fan', f'{h["fan_rpm"]} rpm' if h['fan_rpm'] else ''),
+        stat('Fan', f'{h["fan_rpm"]} rpm' if h['fan_rpm'] not in ('', '0') else 'no speed sensor'),
         stat('Lidar temp', f'{h["lidar_temp_c"]} °C' if h['lidar_temp_c'] else ''),
         stat('Storage', f'{h["storage"].upper()} · {h["disk_free_gb"]} GB free'),
         stat('Camera', h['camera']),
         stat('Power', power),
         stat('Sensor errors (last min)', h['sensor_errors']),
     ])
-    return f'<div class="card"><h2>Status <span class="muted">· {esc(h["timestamp"][11:16])}</span></h2>' \
+    return f'<div class="card" id="status"><h2>Status <span class="muted">· {esc(h["timestamp"][11:16])}</span></h2>' \
            f'<p>{badge}</p><div class="stats">{stats}</div></div>'
 
 
@@ -396,7 +514,7 @@ img.addEventListener('touchend', ev => {{
   if (Math.abs(dx) > 50 && a) {{ ev.preventDefault(); location.href = a.href; }}
 }});
 </script>"""
-    return page(f'Car {dt:%Y-%m-%d %H:%M:%S}', body)
+    return page(f'Car {dt:%Y-%m-%d %H:%M:%S}', body, snow=False)
 
 
 def photos_grid(evs, limit=None, show_date=False):
@@ -449,7 +567,7 @@ def photos_section(p):
     bar = (f'<div class="vbar">{btn("◀ Newer", p - 1, p > 1)}'
            f'<div class="vtitle"><strong>{"Latest" if p == 1 else f"Page {p}"}</strong>'
            f'<span class="muted">{esc(span)}</span></div>{btn("Older ▶", p + 1, older)}</div>')
-    return (f'<div class="card" id="photos"><h2>Photos</h2>{bar}'
+    return (f'<div class="card" id="photos"><h2>{"🎁 " if xmas() else ""}Photos</h2>{bar}'
             f'{photos_grid(list(reversed(evs)), show_date=True)}'
             f'{bar if len(evs) > 4 else ""}</div>')
 
@@ -464,18 +582,37 @@ def dashboard(p=1):
     totals = [len(cd.events(d.isoformat())) for d in days]
     daily = line_chart(totals, [d.strftime('%d') for d in days],
                       [f'{d:%a %d %b} · {n} car{"s" * (n != 1)}' for d, n in zip(days, totals)], label_every=2)
+    hour = sum(1 for e in evs if e['timestamp'][11:13] == f'{datetime.now():%H}')
+    festive = xmas()
+    kind, text, _, age = health_status()
+    if festive and kind == 'good':
+        text += ' · Rudolph is on watch 🦌'
+    status = status_badge(kind, text) + paused_pill(age)
+    extra, cheer = '', ''
+    if festive:
+        cd_ = xmas_countdown()
+        if cd_:
+            extra = f'<div><div class="mid">{cd_[0]}</div><div class="sub">{cd_[1]}</div></div>'
+        if len(evs) > yday > 0:
+            cheer = '<div class="cheer">🎉 Busier than yesterday!</div>'
+    em = (lambda e: e + ' ') if festive else (lambda e: '')
+    scene = (f'<div class="scene" aria-hidden="true">{LIGHTS}<div class="lane">'
+             f'<span class="drive" id="drive">{WAGON_SVG}</span></div></div>') if festive else ''
+    if kind != 'good':
+        status += ' <a href="/settings#status">Details →</a>'
     body = f"""
-<div class="row"><div class="card"><h2>Today · {today:%a %d %b %Y}</h2><div class="hero">
-<div><div class="big">{len(evs)}</div><div class="sub">cars today</div></div>
-<div><div style="font-size:24px;font-weight:600">{yday}</div><div class="sub">yesterday</div></div>
-<div><div style="font-size:24px;font-weight:600">{last}</div><div class="sub">last car</div></div></div></div>
-{health_card()}</div>
-<div class="row"><div class="card"><h2>Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
-<div class="card"><h2>Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
+<div class="card summary"><h2>Today · {today:%a %d %b %Y}</h2><div class="hero">
+<div><div class="big">{len(evs)}</div><div class="sub">{em('🚗')}cars today</div>{cheer}</div>
+<div><div class="mid">{hour}</div><div class="sub">{em('⏰')}this hour</div></div>
+<div><div class="mid">{yday}</div><div class="sub">{em('📆')}yesterday</div></div>
+<div><div class="mid">{last}</div><div class="sub">{em('🛷')}last car</div></div>{extra}
+<div class="status">{status}</div></div></div>
+{scene}<div class="row"><div class="card"><h2>{em('⭐')}Cars per hour · today</h2>{hourly_chart(evs, t)}<p><a href="/day/{t}">Today's events →</a></p></div>
+<div class="card"><h2>{em('❄️')}Cars per day · last 14 days</h2>{daily}<p><a href="/days">All days →</a></p></div></div>
 {photos_section(p)}"""
     if p > 1:   # browsing older photos: don't auto-refresh back to the newest
         return page('Car Counter', body, active='/')
-    return page('Car Counter', body, refresh=60, active='/', watch=t)
+    return page('Car Counter', body, refresh=60, active='/', watch=t, drive=len(evs))
 
 
 def day_page(d):
@@ -532,7 +669,7 @@ def fmt(v):
 
 APPLY_NOTE = {'live': 'applies immediately', 'restart': 'counter restarts (~5 s)',
               'next run': 'applies at next hourly maintenance', 'ups': 'applies within a few seconds',
-              'alerts': 'applies within 30 s'}
+              'alerts': 'applies within 30 s', 'web': 'applies on the next page load'}
 POWER_KEYS = [k for k, st in cd.SETTING.items() if st['group'] == 'Power']
 ALERT_KEYS = [k for k, st in cd.SETTING.items() if st['group'] == 'Notifications']
 COUNTER_KEYS = [k for k in cd.SETTING if k not in POWER_KEYS and k not in ALERT_KEYS]
@@ -545,7 +682,7 @@ def settings_cards(keys, values, errors):
         if st['type'] == 'bool':
             inp = f'<input type="checkbox" name="{key}" id="{key}" value="1"{" checked" if v else ""}>'
         elif st['type'] == 'choice':
-            opts = ''.join(f'<option{" selected" if o == v else ""}>{o}</option>' for o in cd.PHOTO_SIZES)
+            opts = ''.join(f'<option{" selected" if o == v else ""}>{o}</option>' for o in cd.CHOICES[key])
             inp = f'<select name="{key}" id="{key}">{opts}</select>'
         elif st['type'] == 'time':
             inp = f'<input type="time" name="{key}" id="{key}" value="{esc(v)}" required>'
@@ -580,6 +717,7 @@ def settings_page(values=None, errors=None, msg=None):
     values = values or cd.load_settings()
     errors = errors or {}
     body = f"""{banner(msg, errors)}
+{health_card()}
 <div class="card"><h2>Live beam reading</h2>
 <div class="hero"><div><div class="live" id="l-dist">—</div><div class="sub">distance</div></div>
 <div><div class="live" id="l-amp">—</div><div class="sub">strength</div></div>
@@ -713,7 +851,7 @@ def apply_message(changed):
     if not changed:
         return 'No changes.'
     msg = 'Saved: ' + ', '.join(cd.SETTING[k]['label'] for k in changed) + '.'
-    counter = [k for k in changed if k in COUNTER_KEYS]
+    counter = [k for k in changed if k in COUNTER_KEYS and cd.SETTING[k]['apply'] != 'web']
     if counter:
         err = signal_counter(signal.SIGHUP)
         if err:
