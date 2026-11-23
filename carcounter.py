@@ -48,6 +48,8 @@ BASELINE_ALPHA = 0.002      # slow drift tracking while clear (~5 s time constan
 STUCK_SPREAD_CM = 10        # "steady" = last 10 s of readings within this spread
 WATCHDOG_PING_S = 5         # systemd watchdog keep-alive (service has WatchdogSec=60)
 WRITER_STALL_S = 45         # a photo/CSV job running longer than this = hung -> stop pinging
+PHOTO_WAIT_S = 8            # a car's CSV row waits at most this long for its photo
+CAMERA_TEST_S = 6           # startup test frame must arrive within this
 LIVE_EVERY_S = 0.5          # live reading for the web Settings page
 
 # ---------------------------------------------------------------- tunable settings
@@ -103,21 +105,31 @@ def count_existing_today():
 
 
 class Writer:
-    """Background thread for slow work (photo capture, CSV append), so the
-    100 Hz sensor loop never stalls. Jobs run in FIFO order, so an event's photo
-    is always finished before its CSV row is written."""
+    """Background threads for slow work, so the 100 Hz sensor loop never stalls:
+    a camera thread takes photos, a writer thread appends CSV rows. A car's row waits
+    for its photo for at most PHOTO_WAIT_S, so a hung camera can't hold up (or, when
+    the watchdog restarts us, lose) the counts."""
 
     def __init__(self, camera_enabled):
         self.q = queue.Queue(maxsize=50)
+        self.cq = queue.Queue(maxsize=20)
         self.cam = None
-        self.busy_since = None
+        self.busy = {'writer': None, 'camera': None}
         if camera_enabled:
             try:
                 self.cam = self._open_camera()
             except Exception:
                 log.exception('Camera failed to start - counting without photos')
-        self.thread = threading.Thread(target=self._run, name='writer', daemon=True)
+            if self.cam and not self._test_capture():
+                log.error('Camera started but is not delivering frames - counting without photos '
+                          '(check the ribbon cable; restart the counter once fixed)')
+                self.cam = None     # a hung camera can't be closed cleanly; just stop using it
+        self.thread = threading.Thread(target=self._run, args=(self.q, 'writer'), name='writer', daemon=True)
         self.thread.start()
+        self.cam_thread = None
+        if self.cam:
+            self.cam_thread = threading.Thread(target=self._run, args=(self.cq, 'camera'), name='camera', daemon=True)
+            self.cam_thread.start()
 
     @staticmethod
     def _open_camera():
@@ -131,6 +143,22 @@ class Writer:
         log.info('Camera ready %s, manual focus LensPosition=%.2f', PHOTO_SIZE, LENS_POSITION)
         return cam
 
+    def _test_capture(self, timeout=None):
+        """One frame within `timeout` s? Stops a dead camera from hanging every photo (and the
+        watchdog restarting us every couple of minutes)."""
+        ok = []
+
+        def grab():
+            try:
+                self.cam.capture_request().release()
+                ok.append(True)
+            except Exception as e:
+                log.error('Camera test capture failed: %s', e)
+        t = threading.Thread(target=grab, name='camera-test', daemon=True)
+        t.start()
+        t.join(timeout or CAMERA_TEST_S)
+        return bool(ok)
+
     @staticmethod
     def _controls():
         from libcamera import controls
@@ -139,21 +167,34 @@ class Writer:
                 else controls.AeExposureModeEnum.Normal}
 
     def update_controls(self):
-        self.submit(self._update_controls)
+        self.submit(self._update_controls, q=self.cq)
 
     def _update_controls(self):
         if self.cam:
             self.cam.set_controls(self._controls())
             log.info('Camera controls updated: LensPosition=%.2f short exposure=%s', LENS_POSITION, SHORT_EXPOSURE)
 
-    def submit(self, job, *args):
+    def submit(self, job, *args, q=None):
         try:
-            self.q.put_nowait((job, args))
+            (q or self.q).put_nowait((job, args))
+            return True
         except queue.Full:
-            log.warning('Writer queue full, dropping %s', job.__name__)
+            log.warning('%s queue full, dropping %s', 'Camera' if q is self.cq else 'Writer', job.__name__)
+            return False
+
+    def busy_for(self, name):
+        b = self.busy[name]
+        return 0 if b is None else time.monotonic() - b
 
     def photo(self, ev):
-        self.submit(self._photo, ev)
+        if not self.cam:
+            return
+        ev['photo_done'] = threading.Event()
+        if self.busy_for('camera') > PHOTO_WAIT_S:
+            log.warning('Camera busy for %.0f s (hung?) - no photo for this car', self.busy_for('camera'))
+            ev['photo_done'].set()
+        elif not self.submit(self._photo, ev, q=self.cq):
+            ev['photo_done'].set()
 
     def row(self, ev):
         self.submit(self._row, ev)
@@ -161,6 +202,12 @@ class Writer:
     def close(self):
         self.q.put((None, ()))
         self.thread.join(timeout=10)
+        if self.cam_thread:
+            try:
+                self.cq.put_nowait((None, ()))
+            except queue.Full:
+                pass
+            self.cam_thread.join(timeout=5)
         if self.cam:
             try:
                 self.cam.stop()
@@ -169,31 +216,34 @@ class Writer:
                 pass
 
     def healthy(self):
-        b = self.busy_since
-        return self.thread.is_alive() and (b is None or time.monotonic() - b < WRITER_STALL_S)
+        """False -> stop pinging the watchdog so systemd restarts us (reopens a hung camera).
+        Rows don't wait on a hung camera, so they are all written by then."""
+        if not self.thread.is_alive() or self.busy_for('writer') >= WRITER_STALL_S:
+            return False
+        return self.cam_thread is None or (self.cam_thread.is_alive() and self.busy_for('camera') < WRITER_STALL_S)
 
     def health(self, row):
         self.submit(self._health, row)
 
-    def _run(self):
+    def _run(self, q, name):
         while True:
-            job, args = self.q.get()
+            job, args = q.get()
             if job is None:
                 return
-            self.busy_since = time.monotonic()
+            self.busy[name] = time.monotonic()
             try:
                 job(*args)
             except Exception:
-                log.exception('Writer job %s failed', job.__name__)
+                log.exception('%s job %s failed', name.title(), job.__name__)
             finally:
-                self.busy_since = None
+                self.busy[name] = None
 
     def _health(self, row):
         root = storage_root()
         row.update(storage='usb' if root == USB_ROOT else 'sd',
                    disk_free_gb=_r(cd.disk_free_gb(root), 1),
                    cpu_temp_c=_r(cd.cpu_temp(), 1), fan_rpm=cd.fan_rpm(), throttled=throttled(),
-                   camera='ok' if self.cam else 'none')
+                   camera='none' if not self.cam else 'hung' if self.busy_for('camera') > PHOTO_WAIT_S else 'ok')
         ups = cd.ups_state()
         if ups:
             row.update(ac_power=int(ups['ac']), battery_v=ups.get('volts'), battery_pct=ups.get('pct'))
@@ -205,8 +255,12 @@ class Writer:
                 log.warning('Health write to %s failed: %s', r, e)
 
     def _photo(self, ev):
-        if not self.cam:
-            return
+        try:
+            self._take_photo(ev)
+        finally:
+            ev['photo_done'].set()
+
+    def _take_photo(self, ev):
         name = datetime.fromtimestamp(ev['t']).strftime('%Y%m%d_%H%M%S_%f')[:-3] + '.jpg'
         req = self.cam.capture_request()      # grab the frame first, then try where to save it
         try:
@@ -223,6 +277,10 @@ class Writer:
             req.release()
 
     def _row(self, ev):
+        done = ev.get('photo_done')
+        if done and not done.wait(PHOTO_WAIT_S):
+            log.warning('Photo not ready after %d s (camera hung?) - logging car #%s without it',
+                        PHOTO_WAIT_S, ev['count'])
         row = {
             'timestamp': datetime.fromtimestamp(ev['t']).isoformat(timespec='milliseconds'),
             'count_today': ev['count'],

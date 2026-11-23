@@ -20,7 +20,7 @@ def fake_photo(ev, root):
     p = cc.day_dir(root, ev['t']) / 'photos' / f"{int(ev['t'])}.jpg"; p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b'jpg'); ev['photo'] = str(p)
 def drain():
-    while not w.q.empty() or w.busy_since: time.sleep(0.05)
+    while not w.q.empty() or w.busy['writer']: time.sleep(0.05)
     time.sleep(0.1)
 now, yesterday = time.time(), time.time() - 86400
 today, yday = cd.today(), time.strftime('%Y-%m-%d', time.localtime(yesterday))
