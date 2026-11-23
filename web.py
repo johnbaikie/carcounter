@@ -906,6 +906,27 @@ def dur(s):
     return f'{s // 3600} h {s % 3600 // 60} min' if s >= 3600 else f'{s // 60} min {s % 60} s'
 
 
+UPS_CODE = ('ups_monitor.py', 'alerts.py', 'carcount_data.py')
+UPS_DIR = Path('/opt/carcount')
+
+
+def ups_code_status():
+    """The UPS monitor runs as root from a root-owned copy in /opt/carcount (scripts/install-ups.sh).
+    Returns a note if that copy is missing or differs from ~/src, else None."""
+    here = Path(__file__).resolve().parent
+    try:
+        stale = [f for f in UPS_CODE if (UPS_DIR / f).read_bytes() != (here / f).read_bytes()]
+    except FileNotFoundError:
+        return ('The UPS monitor code is not installed yet. Install it (root-owned copy in /opt/carcount) with: '
+                f'sudo sh {here}/scripts/install-ups.sh')
+    except OSError:
+        return None
+    if stale:
+        return (f'The UPS monitor is running older code ({", ".join(stale)} changed). Update it with: '
+                f'sudo sh {here}/scripts/install-ups.sh')
+    return None
+
+
 def power_card():
     svc = ups_service()
     st = cd.ups_state()
@@ -946,7 +967,10 @@ def power_card():
     notes.append('Battery voltage and charge are only meaningful with batteries installed.')
     if vin is not None and vin < 4.9:
         notes.append(f'Input voltage is low ({vin:.2f} V) - check the extension cord and power supply.')
-    if not svc['active']:
+    code = ups_code_status()
+    if code:
+        notes.append(code)
+    elif not svc['active']:
         notes.append('After testing the batteries, start the monitor with: '
                      'sudo systemctl enable --now carcount-ups')
     return (f'<h2>UPS status <span class="muted">· {datetime.now():%H:%M:%S}</span></h2><p>{badge}</p>'

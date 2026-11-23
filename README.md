@@ -60,7 +60,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now carcount carcount-web carcount-alerts carcount-maintenance.timer
 # UPS monitor only once batteries are installed and tested:
 #   sudo python3 ~/src/ups_monitor.py --dry-run
+#   sudo sh ~/src/scripts/install-ups.sh        # root-owned copy in /opt/carcount + unit
 #   sudo systemctl enable --now carcount-ups
+# The monitor runs as root, so it runs from /opt/carcount, not ~/src. Re-run install-ups.sh
+# after changing ups_monitor.py, alerts.py or carcount_data.py (the Power page reminds you).
 ```
 Paths assume user `carcount` with the code in `/home/carcount/src`.
 

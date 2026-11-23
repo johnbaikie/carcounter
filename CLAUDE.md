@@ -42,6 +42,9 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - ups_monitor.py: PLD + fuel gauge; shuts down only when on battery AND (low for N reads OR max time on battery);
   sets RTC wakealarm first. UPS_* settings re-read from config.json when it changes (runs as root, no signal needed).
   Writes /run/carcount-ups.json (state, pending shutdown, grace). `--once`, `--dry-run`
+  Runs as ROOT from a root-owned copy in /opt/carcount (with alerts.py, carcount_data.py): `sudo sh scripts/install-ups.sh`
+  installs/updates code + unit (hardened: ProtectHome=read-only etc.). Re-run after changing any of those 3 files;
+  the Power page warns when the copy differs from ~/src. Never point the unit back at ~/src (carcount-writable -> root).
 - maintenance.py (hourly timer): SD fallback -> USB merge, photo retention (365 d / min free GB), summary_daily.csv, SQLite update
 - carcount_db.py: derived SQLite copy at ~/.local/share/carcount/carcount.db (ext4, WAL), incremental by file size/mtime,
   auto-rebuild on schema change or corruption. CSVs stay the source of truth. Web does not use it yet.

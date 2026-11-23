@@ -4,9 +4,17 @@ After=local-fs.target
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/bin/python3 -u /home/carcount/src/ups_monitor.py
+# Root-owned copy installed by scripts/install-ups.sh - never run root code from ~/src.
+# -B no .pyc files, -E ignore PYTHON* environment variables, -s no user site-packages.
+ExecStart=/usr/bin/python3 -B -E -s -u /opt/carcount/ups_monitor.py
+WorkingDirectory=/opt/carcount
 Restart=always
 RestartSec=10
+# Hardening: reads config.json / pushover.json in /home/carcount but never writes there.
+ProtectHome=read-only
+ProtectSystem=full
+PrivateTmp=yes
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=multi-user.target
