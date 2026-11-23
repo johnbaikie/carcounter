@@ -119,7 +119,10 @@ for k in ('usb', 'hot'):
     a.state['active'][k] -= 200
 a.check()
 msgs = ' | '.join(x[1] for x in take())
-assert 'USB drive' in msgs and '83 °C' in msgs, msgs
+assert 'USB drive' in msgs and '83 °C' in msgs and 'rpm' not in msgs, msgs
+world['temp'] = 77.0          # below the 80 °C limit but within the 5 °C hysteresis -> still hot
+a.check()
+assert take() == []
 world['usb'], world['temp'] = True, 60.0
 a.check()
 assert len(take()) == 2

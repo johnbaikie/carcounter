@@ -275,8 +275,11 @@ class Alerts:
                        lambda: f'Only {free:.1f} GB free on the {"USB drive" if usb else "SD card"}, '
                                'even after deleting old photos.', 'Disk space is OK again.')
         temp = cd.cpu_temp()
-        self.condition('hot', P, temp is not None and temp >= cfg['ALERT_CPU_TEMP'], 120, PROBLEM,
-                       lambda: f'The Pi is hot: CPU {temp:.0f} °C (fan {cd.fan_rpm() or 0} rpm). '
+        # 5 °C hysteresis so a reading hovering at the limit doesn't flip hot/normal every check
+        hot_limit = cfg['ALERT_CPU_TEMP'] - (5 if 'hot' in self.state['active'] else 0)
+        rpm = cd.fan_rpm()
+        self.condition('hot', P, temp is not None and temp >= hot_limit, 120, PROBLEM,
+                       lambda: f'The Pi is hot: CPU {temp:.0f} °C{f" (fan {rpm} rpm)" if rpm else ""}. '
                                'It slows itself down from about 85 °C.',
                        lambda _: f'Temperature is back to normal ({temp:.0f} °C).')
         try:

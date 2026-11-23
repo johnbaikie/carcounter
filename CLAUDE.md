@@ -12,7 +12,8 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
   - EEPROM: PSU_MAX_CURRENT=5000, POWER_OFF_ON_HALT=1
   - Scripts cloned from https://github.com/suptronics/x120x (bat.py, pld.py, merged.py / *-trixie variants)
   - BATTERIES NOT INSTALLED YET (arriving soon). Do not enable the x120x-ups systemd service until they are in and bat.py/pld.py are tested.
-- Fan: config.txt has dtparam=cooling_fan=on (cooling_device0 works); original fan connector is faulty, planning Active Cooler or GPIO fan
+- Fan: 80 mm 5 V fan on GPIO 5V/GND (always on, no tach -> fan_rpm 0 is normal). Optional: MOSFET on GPIO12 +
+  dtoverlay=gpio-fan,gpiopin=12 (not done). Mount: hardware/pi_fan_mount.scad. Original fan connector is faulty
 - Storage: 123 GB USB drive (vfat, UUID 344F-1B4F) fstab-mounted at /mnt/carcount (nofail,flush; fstab backup /etc/fstab.bak-20261120)
 - Remote access: Tailscale (tailscaled enabled, operator=carcount); web at http://carcounter:8080 from tailnet devices. Never port-forward (no auth)
 - Power: mains via outdoor extension cord -> 5V/5A USB-C into X1202; batteries are backup only (~5-9 h runtime)
@@ -30,7 +31,8 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - carcounter.py: v1 counter. Schedule settings COUNT_START/STOP, PHOTO_START/STOP (HH:MM, equal = all day, wraps midnight;
   outside counting hours blockages are tracked but not logged). Tunables from settings; SIGHUP = reload (camera size/enable -> self-exit, systemd restarts),
   SIGUSR1 = recalibrate. Writes /dev/shm/carcount-live.json 2x/s. `-v` prints frames, `--no-camera`.
-  Output: <root>/YYYY-MM-DD/{events.csv,health.csv,photos/,thumbs/}. Photos/CSV/health on a writer thread.
+  Output: <root>/YYYY-MM-DD/{events.csv,health.csv,photos/,thumbs/}. Photos on a camera thread, CSV/health on a writer thread;
+  a row waits <= PHOTO_WAIT_S for its photo (hung camera can't lose counts); startup test frame, else runs without camera.
   health.csv every 60 s (fps, valid%, baseline, lidar/CPU temp, fan rpm, throttled, disk, camera, UPS). sd_notify watchdog.
 - alerts.py (carcount-alerts.service, user carcount): Pushover notifications, checks every 30 s. Problems (counter down,
   lidar/camera, beam blocked, USB missing, disk, CPU hot, under-voltage), power (mains/battery, Pi restarted = power cut),
@@ -43,9 +45,10 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - maintenance.py (hourly timer): SD fallback -> USB merge, photo retention (365 d / min free GB), summary_daily.csv, SQLite update
 - carcount_db.py: derived SQLite copy at ~/.local/share/carcount/carcount.db (ext4, WAL), incremental by file size/mtime,
   auto-rebuild on schema change or corruption. CSVs stay the source of truth. Web does not use it yet.
-- web.py: LAN page on port 8080 (no auth): today, status, hourly/14-day line charts, photos, /day/<date>, /days,
+- web.py: LAN page on port 8080 (no auth): today (counts + one-line status, charts, photos), /day/<date>, /days,
   /view/<day>/<photo> (photo viewer: earlier/later buttons, arrow keys, swipe, crosses days),
-  /settings (live beam reading, edit settings -> signals counter, recalibrate button),
+  /settings (full status card, live beam reading, edit settings -> signals counter, recalibrate button),
+  WEB_THEME Auto/Christmas/Plain (Auto = 15 Nov-6 Jan): lights, snow, emoji, wagon (static/wagon.svg, original art) drives a road per new car,
   /power (UPS status - direct GPIO/I2C read if monitor not running, input voltage, battery chart, power events from journal, UPS_* settings)
 - Deploy code changes: Settings page > System card Restart buttons (import-check first), or
   kill $(systemctl show -p MainPID --value carcount[-web]) (Restart=always)
@@ -61,7 +64,8 @@ Count cars passing the bottom of a cul-de-sac with a TF-Luna lidar beam, photogr
 - CSV per event in date folders on USB with SD fallback; maintenance merges SD days back to USB (tests/test_fallback.py)
 - systemd: counter, web, maintenance timer ENABLED. carcount-ups installed, NOT enabled (batteries)
 - Still to verify on hardware: RTC wake after shutdown (Pi 5 + POWER_OFF_ON_HALT=1); real mains-loss test once batteries are in
-- Tests: python3 tests/test_detector.py; tests/test_fallback.py; tests/test_db.py
+- Tests: python3 tests/test_detector.py; tests/test_fallback.py; tests/test_db.py; tests/test_alerts.py; tests/test_writer.py
+  (tests must point USB_ROOT/SD_ROOT in BOTH carcounter and carcount_data at a temp dir - never the real drive)
 
 ## v2 / later
 - DONE: retention, daily/hourly summaries, health logging, watchdog, web page
